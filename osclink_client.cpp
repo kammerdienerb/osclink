@@ -419,46 +419,39 @@ int main(void) {
 
 
         if (heatmap.size()) {
-            ImVec2 size(20, 20);
-            const int heatmap_height = 10;
+            ImGui::BeginChild("heatmap", {}, ImGuiChildFlags_AutoResizeY);
+                ImVec2 size(16, 16);
+                const int heatmap_height = 10;
 
-            ImGui::PlotLines("##", cast_to_float, heatmap.data(), heatmap.size(), 0, NULL, FLT_MAX, FLT_MAX, { size.x * (heatmap.size() / heatmap_height), 2 * size.y });
+                ImGui::PlotLines("##", cast_to_float, heatmap.data(), heatmap.size(), 0, NULL, FLT_MAX, FLT_MAX, { size.x * (heatmap.size() / heatmap_height), 2 * size.y });
 
-            int max = 0;
-            for (int x : heatmap) {
-                if (x > max) { max = x; }
-            }
+                int max = 0;
+                for (int x : heatmap) {
+                    if (x > max) { max = x; }
+                }
 
+                float left = ImGui::GetCursorPosX();
+                float top  = ImGui::GetCursorPosY();
 
-            float left   = ImGui::GetCursorPosX();
-            float top    = ImGui::GetCursorPosY();
-            float bottom = top + ((heatmap_height + 1) * size.y);
+                int i = 0;
+                for (int x : heatmap) {
+                    ImGui::SetCursorPosY(top + ((i % heatmap_height) * size.y));
+                    ImGui::SetCursorPosX(left + ((i / heatmap_height) * size.x));
 
-            int i = 0;
-            for (int x : heatmap) {
-                ImGui::SetCursorPosY(top + ((i % heatmap_height) * size.y));
-                ImGui::SetCursorPosX(left + ((i / heatmap_height) * size.x));
+                    ImGui::Dummy(size);
 
-                // Reserve space in layout & expand scroll region:
-                ImGui::Dummy(size);
+                    ImVec2 p0 = ImGui::GetItemRectMin();
+                    ImVec2 p1 = ImGui::GetItemRectMax();
 
-                // Get the space we just reserved:
-                ImVec2 p0 = ImGui::GetItemRectMin();
-                ImVec2 p1 = ImGui::GetItemRectMax();
+                    int c = 255 - (int)(((float)x / (float)max) * 255.0);
+                    ImU32 col = ImGui::IsItemHovered() ? IM_COL32(255, 0, 255, 255) : IM_COL32(255, c, c, 255);
 
-                int c = 255 - (int)(((float)x / (float)max) * 255.0);
-                ImU32 col = ImGui::IsItemHovered() ? IM_COL32(255, 0, 255, 255) : IM_COL32(255, c, c, 255);
+                    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+                    draw_list->AddRectFilled(p0, p1, col);
 
-                // Draw into that space:
-                ImDrawList* draw_list = ImGui::GetWindowDrawList();
-                draw_list->AddRectFilled(p0, p1, col);
-
-                i += 1;
-            }
-
-            ImGui::SetCursorPosY(bottom);
-            ImGui::SetCursorPosX(left);
-            ImGui::Dummy({ 1, 1 });
+                    i += 1;
+                }
+            ImGui::EndChild();
         }
 
         ImGui::End();
