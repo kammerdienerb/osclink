@@ -1,4 +1,6 @@
 #include <string>
+#include <sstream>
+#include <optional>
 #include <thread>
 #include <queue>
 #include <mutex>
@@ -12,7 +14,12 @@
 #include <sys/types.h>
 #include <poll.h>
 #include <fcntl.h>
+#ifdef __APPLE__
 #include <util.h>
+#else
+#include <pty.h>
+#include <utmp.h>
+#endif
 #include <pwd.h>
 
 #include "base64.hpp"
@@ -75,6 +82,7 @@ static const char     *osc_pattern = "\033]9998;";
 
 static void restore_term(void) {
     tcsetattr(0, TCSAFLUSH, &sav_term);
+    printf("\nOSCLink closed.\n");
 }
 
 static void sigwinch_handler(int sig) {
@@ -156,6 +164,7 @@ static void setup_pty(void) {
         if (shell == NULL) {
             shell = "/usr/bin/bash";
         }
+
         execlp(shell, shell, NULL);
         exit(123);
     }
@@ -168,6 +177,8 @@ static void setup_pty(void) {
 
     close(replica_fd);
 }
+
+static int pty_read_thread_should_stop;
 
 static void pty_read_thread(void) {
     std::string cur_msg;
@@ -189,10 +200,10 @@ static void pty_read_thread(void) {
 
     const char *osc_state = osc_pattern;
 
-    for (;;) {
+    while (!pty_read_thread_should_stop) {
         errno = 0;
 
-        if (poll(pfds, 2, -1) <= 0) {
+        if (poll(pfds, 2, 100) <= 0) {
             if (errno) {
                 if (errno != EINTR) {
                     goto out;
@@ -274,6 +285,36 @@ static void pty_read_thread(void) {
 out:;
 }
 
+static void send_to_server(std::string &&msg) {
+    std::string payload = "\033]9999;";
+    try {
+        payload += base64::to_base64(msg);
+    } catch (...) {}
+    payload += "\007\n";
+
+    int n = payload.size();
+    int t = 0;
+    int w = 0;
+    while (t < n) {
+        errno = 0;
+        w = write(primary_fd, payload.c_str() + t, n - t);
+
+        if (w > 0) {
+            t += w;
+        } else if (w < 0 && (errno == EINTR || errno == EAGAIN)) {
+            continue;
+        } else {
+            break;
+        }
+    }
+}
+
+static float cast_to_float(void *data, int idx) {
+    int *ints = (int*)data;
+
+    return (float)ints[idx];
+}
+
 int main(void) {
     if (!isatty(STDOUT_FILENO)) {
         printf("must be run in a terminal\n");
@@ -319,7 +360,7 @@ int main(void) {
 #endif
 
     // Create window
-    GLFWwindow* window = glfwCreateWindow(800, 600, "ImGui Starter", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(800, 600, "OSCLink", NULL, NULL);
     if (!window) return 1;
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1); // Enable vsync
@@ -329,14 +370,16 @@ int main(void) {
     ImGui::CreateContext();
     ImGuiIO &io = ImGui::GetIO(); (void)io;
 
-    // Setup ImGui style
-    ImGui::StyleColorsDark();
-
     // Setup Platform/Renderer backends
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
 
+
+
+    ImGui::GetStyle().WindowRounding = 0.0f;
+
     std::vector<std::string> new_messages;
+    std::vector<int> heatmap;
 
     // Main loop
     while (!glfwWindowShouldClose(window)) {
@@ -352,11 +395,72 @@ int main(void) {
             new_messages.push_back(std::move(*m));
         }
 
-        // Example ImGui window
-        ImGui::Begin("Messages");
-        for (const auto &m : new_messages) {
-            ImGui::Text("%s", m.c_str());
+        if (new_messages.size()) {
+            heatmap.clear();
+
+            auto &data = new_messages.back();
+
+            std::stringstream ss(data);
+            std::string num;
+            while (std::getline(ss, num, ';')) {
+                heatmap.push_back(std::stoi(num));
+            }
+
+            new_messages.clear();
         }
+
+        ImGui::SetNextWindowPos({ 0, 0 });
+        ImGui::SetNextWindowSize({ io.DisplaySize.x, io.DisplaySize.y });
+        ImGui::Begin("Main", NULL, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
+
+        if (ImGui::Button("Get Data From Server")) {
+            send_to_server("numbers please");
+        }
+
+
+        if (heatmap.size()) {
+            ImVec2 size(20, 20);
+            const int heatmap_height = 10;
+
+            ImGui::PlotLines("##", cast_to_float, heatmap.data(), heatmap.size(), 0, NULL, FLT_MAX, FLT_MAX, { size.x * (heatmap.size() / heatmap_height), 2 * size.y });
+
+            int max = 0;
+            for (int x : heatmap) {
+                if (x > max) { max = x; }
+            }
+
+
+            float left   = ImGui::GetCursorPosX();
+            float top    = ImGui::GetCursorPosY();
+            float bottom = top + ((heatmap_height + 1) * size.y);
+
+            int i = 0;
+            for (int x : heatmap) {
+                ImGui::SetCursorPosY(top + ((i % heatmap_height) * size.y));
+                ImGui::SetCursorPosX(left + ((i / heatmap_height) * size.x));
+
+                // Reserve space in layout & expand scroll region:
+                ImGui::Dummy(size);
+
+                // Get the space we just reserved:
+                ImVec2 p0 = ImGui::GetItemRectMin();
+                ImVec2 p1 = ImGui::GetItemRectMax();
+
+                int c = 255 - (int)(((float)x / (float)max) * 255.0);
+                ImU32 col = ImGui::IsItemHovered() ? IM_COL32(255, 0, 255, 255) : IM_COL32(255, c, c, 255);
+
+                // Draw into that space:
+                ImDrawList* draw_list = ImGui::GetWindowDrawList();
+                draw_list->AddRectFilled(p0, p1, col);
+
+                i += 1;
+            }
+
+            ImGui::SetCursorPosY(bottom);
+            ImGui::SetCursorPosX(left);
+            ImGui::Dummy({ 1, 1 });
+        }
+
         ImGui::End();
 
         // Rendering
@@ -370,6 +474,9 @@ int main(void) {
 
         glfwSwapBuffers(window);
     }
+
+    pty_read_thread_should_stop = 1;
+    pty_thr.join();
 
     // Cleanup
     ImGui_ImplOpenGL3_Shutdown();

@@ -10,6 +10,13 @@ SRC+=" imgui/backends/imgui_impl_glfw.cpp"
 SRC+=" imgui/backends/imgui_impl_opengl3.cpp"
 
 CPP_FLAGS="--std=c++17 -fno-rtti -Wall -Werror -g -O0 -Iimgui -Iimgui/backends -I/opt/homebrew/include"
-LD_FLAGS="-L/opt/homebrew/lib -lglfw -framework OpenGL"
+
+LD_FLAGS="-L/opt/homebrew/lib -lglfw"
+if [ $(uname) = "Darwin" ]; then
+    LD_FLAGS+=" -framework OpenGL"
+else
+    LD_FLAGS+=" -lGL"
+fi
 
 g++ -o osclink_client ${SRC} ${CPP_FLAGS} ${LD_FLAGS} || exit $?
+g++ -o osclink_server osclink_server.cpp ${CPP_FLAGS} || exit $?
