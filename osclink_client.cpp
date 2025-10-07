@@ -80,7 +80,7 @@ static const char     *osc_pattern = "\033]9998;";
 
 
 
-static void restore_term(void) {
+static void restore_term() {
     tcsetattr(0, TCSAFLUSH, &sav_term);
     printf("\nOSCLink closed.\n");
 }
@@ -105,7 +105,7 @@ static void sigterm_handler(int sig) {
     kill(0, SIGTERM);
 }
 
-static void setup_pty(void) {
+static void setup_pty() {
     /* Set up terminal. */
     struct termios raw_term;
 
@@ -180,7 +180,7 @@ static void setup_pty(void) {
 
 static int pty_read_thread_should_stop;
 
-static void pty_read_thread(void) {
+static void pty_read_thread() {
     std::string cur_msg;
 
     /* Read from PTY and look for messages. Pass STDIN on to PTY. */
@@ -309,25 +309,17 @@ static void send_to_server(std::string &&msg) {
     }
 }
 
-static float cast_to_float(void *data, int idx) {
-    int *ints = (int*)data;
+// static float cast_to_float(void *data, int idx) {
+//     int *ints = (int*)data;
 
-    return (float)ints[idx];
-}
+//     return (float)ints[idx];
+// }
 
-int main(void) {
-    if (!isatty(STDOUT_FILENO)) {
-        printf("must be run in a terminal\n");
-        return 1;
-    }
-
-    setup_pty();
-
-    auto pty_thr = std::thread(pty_read_thread);
-
-
+static GLFWwindow * setup_GLFW_and_ImGui() {
     // Initialize GLFW
-    if (!glfwInit()) return 1;
+    if (!glfwInit()) {
+        return NULL;
+    }
 
 
     // Decide GL+GLSL versions
@@ -361,28 +353,43 @@ int main(void) {
 
     // Create window
     GLFWwindow* window = glfwCreateWindow(800, 600, "OSCLink", NULL, NULL);
-    if (!window) return 1;
+    if (!window) {
+        return NULL;
+    }
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1); // Enable vsync
 
     // Setup ImGui context
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGuiIO &io = ImGui::GetIO(); (void)io;
-
     // Setup Platform/Renderer backends
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
 
+    return window;
+}
 
+struct Widget_Base {
+    virtual void imgui_frame() = delete;
+};
 
-    ImGui::GetStyle().WindowRounding = 0.0f;
+struct UI_Content_Area {
+};
 
-    std::vector<std::string> new_messages;
-    std::vector<int> heatmap;
+struct UI {
+    static UI& get() {
+        static UI ui;
+        return ui;
+    }
 
-    // Main loop
-    while (!glfwWindowShouldClose(window)) {
+    UI(const UI&)            = delete;
+    UI& operator=(const UI&) = delete;
+
+    void set_window(GLFWwindow *window) {
+        this->glfw_window = window;
+    }
+
+    void frame() {
         glfwPollEvents();
 
         // Start ImGui frame
@@ -391,33 +398,62 @@ int main(void) {
         ImGui::NewFrame();
 
 
-        if (auto m = messages.try_pop()) {
-            new_messages.push_back(std::move(*m));
-        }
-
-        if (new_messages.size()) {
-            heatmap.clear();
-
-            auto &data = new_messages.back();
-
-            std::stringstream ss(data);
-            std::string num;
-            while (std::getline(ss, num, ';')) {
-                heatmap.push_back(std::stoi(num));
-            }
-
-            new_messages.clear();
-        }
-
         ImGui::SetNextWindowPos({ 0, 0 });
-        ImGui::SetNextWindowSize({ io.DisplaySize.x, io.DisplaySize.y });
-        ImGui::Begin("Main", NULL, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
+        ImGui::SetNextWindowSize({ this->imgui_io.DisplaySize.x, this->imgui_io.DisplaySize.y });
+        ImGui::Begin("Main", NULL, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_MenuBar);
+
+        if (ImGui::BeginMenuBar()) {
+            if (ImGui::BeginMenu("File")) {
+                if (ImGui::MenuItem("Open", "Ctrl+O")) { /* ... */ }
+                if (ImGui::MenuItem("Save", "Ctrl+S")) { /* ... */ }
+                ImGui::EndMenu();
+            }
+            ImGui::EndMenuBar();
+        }
 
         if (ImGui::Button("Get Data From Server")) {
             send_to_server("numbers please");
         }
 
+        ImGui::End();
 
+        ImGui::Render();
+        int display_w, display_h;
+        glfwGetFramebufferSize(this->glfw_window, &display_w, &display_h);
+        glViewport(0, 0, display_w, display_h);
+        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        glfwSwapBuffers(this->glfw_window);
+    }
+
+    bool window_should_close() {
+        return !!glfwWindowShouldClose(this->glfw_window);
+    }
+
+private:
+    ImGuiIO    &imgui_io;
+    GLFWwindow *glfw_window = NULL;
+
+
+    UI() : imgui_io(ImGui::GetIO()) {
+        ImGui::GetStyle().WindowRounding = 0.0f;
+    }
+
+    ~UI() {
+        // Cleanup
+        ImGui_ImplOpenGL3_Shutdown();
+        ImGui_ImplGlfw_Shutdown();
+        ImGui::DestroyContext();
+        glfwDestroyWindow(this->glfw_window);
+        glfwTerminate();
+    }
+};
+
+struct SSO_Heat_Map_Widget : Widget_Base {
+
+#if 0
         if (heatmap.size()) {
             ImGui::BeginChild("heatmap", {}, ImGuiChildFlags_AutoResizeY);
                 ImVec2 size(16, 16);
@@ -453,30 +489,52 @@ int main(void) {
                 }
             ImGui::EndChild();
         }
+#endif
 
-        ImGui::End();
+};
 
-        // Rendering
-        ImGui::Render();
-        int display_w, display_h;
-        glfwGetFramebufferSize(window, &display_w, &display_h);
-        glViewport(0, 0, display_w, display_h);
-        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+int main() {
+    if (!isatty(STDOUT_FILENO)) {
+        printf("must be run in a terminal\n");
+        return 1;
+    }
 
-        glfwSwapBuffers(window);
+    setup_pty();
+
+    auto pty_thr = std::thread(pty_read_thread);
+
+    GLFWwindow *window = setup_GLFW_and_ImGui();
+    UI         &ui     = UI::get();
+
+    ui.set_window(window);
+
+    std::vector<std::string> new_messages;
+    std::vector<int> heatmap;
+
+    while (!ui.window_should_close()) {
+//         if (auto m = messages.try_pop()) {
+//             new_messages.push_back(std::move(*m));
+//         }
+
+//         if (new_messages.size()) {
+//             heatmap.clear();
+
+//             auto &data = new_messages.back();
+
+//             std::stringstream ss(data);
+//             std::string num;
+//             while (std::getline(ss, num, ';')) {
+//                 heatmap.push_back(std::stoi(num));
+//             }
+
+//             new_messages.clear();
+//         }
+
+        ui.frame();
     }
 
     pty_read_thread_should_stop = 1;
     pty_thr.join();
-
-    // Cleanup
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImGui::DestroyContext();
-    glfwDestroyWindow(window);
-    glfwTerminate();
 
     return 0;
 
