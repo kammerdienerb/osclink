@@ -68,7 +68,7 @@ int main(void) {
 
     printf("Server started. Reaching out to client.\n");
 
-//     send_to_client("hello from server");
+    send_to_client("SERVER-CONNECT");
 
 
     const char *osc_pattern = "\033]9999;";
@@ -86,11 +86,11 @@ int main(void) {
                         printf("got a request\n");
                         auto content = base64::from_base64(cur_msg);
 
-                        std::string out = "";
+                        std::string out = "HEATMAP-DATA";
                         for (int i = 0; i < 500; i += 1) {
+                            out += "\n";
                             int n = random() % 100000;
                             out += std::to_string(n);
-                            out += ";";
                         }
                         send_to_client(std::move(out));
                     } catch (...) {}

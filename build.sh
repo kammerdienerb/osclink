@@ -9,7 +9,7 @@ SRC+=" imgui/imgui_widgets.cpp"
 SRC+=" imgui/backends/imgui_impl_glfw.cpp"
 SRC+=" imgui/backends/imgui_impl_opengl3.cpp"
 
-CPP_FLAGS="--std=c++17 -fno-rtti -Wall -Werror -g -O0 -Iimgui -Iimgui/backends -I/opt/homebrew/include"
+CPP_FLAGS="--std=c++17 -Wall -Werror -g -O0 -Iimgui -Iimgui/backends -I/opt/homebrew/include"
 
 LD_FLAGS="-L/opt/homebrew/lib -lglfw"
 if [ $(uname) = "Darwin" ]; then
