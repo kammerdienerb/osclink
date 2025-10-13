@@ -4,6 +4,7 @@
 #include <vector>
 #include <map>
 #include <memory>
+#include <climits>
 
 #define GL_SILENCE_DEPRECATION
 #if defined(IMGUI_IMPL_OPENGL_ES2)
@@ -76,38 +77,35 @@ GLFWwindow * setup_GLFW_and_ImGui() {
 
 
 struct UI_Widget_Base {
-    virtual void imgui_frame() = 0;
+    virtual void _imgui_frame() = 0;
+
+    void imgui_frame() {
+        ImGui::PushID((int)(u64)(void*)this);
+        this->_imgui_frame();
+        ImGui::PopID();
+    }
+
     virtual ~UI_Widget_Base() {}
 };
-
-static inline float cast_to_float(void *data, int idx) {
-    int *ints = (int*)data;
-
-    return (float)ints[idx];
-}
 
 struct UI_SSO_Heat_Map_Widget : UI_Widget_Base {
     static constexpr int    ROWS = 10;
     static constexpr ImVec2 SIZE = { 16, 16 };
 
-    std::vector<int> data;
+    std::vector<float> data;
+    float              max;
 
-    void imgui_frame() {
+    void _imgui_frame() override {
         if (this->data.size()) {
             ImGui::BeginChild("heatmap", {}, ImGuiChildFlags_AutoResizeY);
 
-                ImGui::PlotLines("##", cast_to_float, this->data.data(), this->data.size(), 0, NULL, FLT_MAX, FLT_MAX, { SIZE.x * (this->data.size() / this->ROWS), 2 * SIZE.y });
-
-                int max = 0;
-                for (int x : this->data) {
-                    if (x > max) { max = x; }
-                }
+                ImGui::PlotLines("##", this->data.data(), this->data.size(), 0, NULL, FLT_MAX, FLT_MAX, { SIZE.x * (this->data.size() / this->ROWS), 2 * SIZE.y });
 
                 float left = ImGui::GetCursorPosX();
                 float top  = ImGui::GetCursorPosY();
 
                 int i = 0;
-                for (int x : this->data) {
+                for (float x : this->data) {
                     ImGui::SetCursorPosY(top + ((i % ROWS) * SIZE.y));
                     ImGui::SetCursorPosX(left + ((i / ROWS) * SIZE.x));
 
@@ -116,7 +114,7 @@ struct UI_SSO_Heat_Map_Widget : UI_Widget_Base {
                     ImVec2 p0 = ImGui::GetItemRectMin();
                     ImVec2 p1 = ImGui::GetItemRectMax();
 
-                    int c = 255 - (int)(((float)x / (float)max) * 255.0);
+                    int c = 255 - (int)((x / this->max) * 255.0);
                     ImU32 col = ImGui::IsItemHovered() ? IM_COL32(255, 0, 255, 255) : IM_COL32(255, c, c, 255);
 
                     ImDrawList* draw_list = ImGui::GetWindowDrawList();
@@ -126,6 +124,22 @@ struct UI_SSO_Heat_Map_Widget : UI_Widget_Base {
                 }
             ImGui::EndChild();
         }
+    }
+
+    void set_data(std::vector<float> &&data) {
+        this->data = std::move(data);
+
+        this->max = FLT_MIN;
+        for (float x : this->data) {
+            if (x > max) { max = x; }
+        }
+
+    }
+};
+
+struct UI_Topology_Widget : UI_Widget_Base {
+    void _imgui_frame() override {
+        ImGui::Text("TOPO");
     }
 };
 
@@ -152,7 +166,7 @@ struct UI_Float_Window_Base {
 struct Log_Window : UI_Float_Window_Base {
     std::vector<std::string> items;
 
-    void _imgui_frame() {
+    void _imgui_frame() override {
         for (auto &item : this->items) {
             ImGui::Text("%s", item.c_str());
         }
@@ -178,9 +192,16 @@ struct UI {
         this->connected = con;
     }
 
-    void add_heatmap(std::vector<int> &&data) {
+    void add_topology() {
+        this->clear_main_panel();
+        auto t = std::make_unique<UI_Topology_Widget>();
+        this->main_panel_widgets.push_back(std::move(t));
+    }
+
+    void add_heatmap(std::vector<float> &&data) {
+        this->clear_main_panel();
         auto h = std::make_unique<UI_SSO_Heat_Map_Widget>();
-        h->data = std::move(data);
+        h->set_data(std::move(data));
         this->main_panel_widgets.push_back(std::move(h));
     }
 
@@ -214,15 +235,21 @@ struct UI {
 
             if (this->connected) {
                 ImGui::BeginChild("Left", { 150, 0 }, ImGuiChildFlags_Border | ImGuiChildFlags_ResizeX);
-                if (ImGui::Button("Request")) {
-                    link.send("DATA");
+                if (ImGui::Button("Topology")) {
+                    link.send("REQUEST/TOPOLOGY");
+                }
+                if (ImGui::Button("Heatmap")) {
+                    link.send("REQUEST/HEATMAP-DATA");
                 }
                 ImGui::EndChild();
 
                 ImGui::SameLine();
+
+                ImGui::BeginChild("Right", { 0, 0 }, 0);
                 for (auto &widget : this->main_panel_widgets) {
                     widget->imgui_frame();
                 }
+                ImGui::EndChild();
             } else {
                 ImGui::Text("Waiting for the server...");
             }
@@ -253,6 +280,10 @@ struct UI {
         if (pop_up) {
             this->get_log()->show = true;
         }
+    }
+
+    void clear_main_panel() {
+        this->main_panel_widgets.clear();
     }
 
 private:

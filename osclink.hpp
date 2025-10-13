@@ -6,6 +6,21 @@
 #include <condition_variable>
 #include <optional>
 
+#include <errno.h>
+#include <sys/ioctl.h>
+#include <termios.h>
+#include <signal.h>
+#include <sys/types.h>
+#include <poll.h>
+#include <fcntl.h>
+#ifdef __APPLE__
+#include <util.h>
+#else
+#include <pty.h>
+#include <utmp.h>
+#endif
+#include <pwd.h>
+
 #include "base64.hpp"
 
 
@@ -45,6 +60,8 @@ public:
 
         return msg;
     }
+
+    size_t size() { return this->q.size(); }
 };
 
 struct OSCLink_Client {
@@ -309,6 +326,119 @@ out:;
 
     OSCLink_Client() {}
 
+};
+
+
+struct OSCLink_Server {
+private:
+    struct termios sav_term;
+    OSCLink_Inbox  inbox;
+
+    static constexpr const char *OSC_PATTERN = "\033]9999;";
+
+public:
+    static OSCLink_Server& get() {
+        static OSCLink_Server server;
+        return server;
+    }
+
+    void start() {
+        this->setup_pty();
+    }
+
+    void send(std::string &&msg) {
+        std::string payload = "\033]9998;";
+        try {
+            payload += base64::to_base64(msg);
+        } catch (...) {}
+        payload += "\007";
+
+        int n = payload.size();
+        int t = 0;
+        int w = 0;
+        while (t < n) {
+            errno = 0;
+            w = write(STDOUT_FILENO, payload.c_str() + t, n - t);
+
+            if (w > 0) {
+                t += w;
+            } else if (w < 0 && (errno == EINTR || errno == EAGAIN)) {
+                continue;
+            } else {
+                break;
+            }
+        }
+    }
+
+    std::string pull_next() {
+
+check:;
+        if (auto msg = this->inbox.try_pop()) { return *msg; }
+
+        const char *osc_state = OSC_PATTERN;
+
+        char buff[4096];
+        std::string cur_msg;
+
+        int n = 0;
+        while ((n = read(STDIN_FILENO, buff, sizeof(buff))) > 0) {
+            for (int i = 0; i < n; i += 1) {
+                if (*osc_state == 0) {
+                    if (buff[i] == '\x07') {
+                        try {
+                            this->inbox.push(base64::from_base64(cur_msg));
+                        } catch (...) {}
+                        cur_msg.clear();
+                        osc_state = OSC_PATTERN;
+                        goto check;
+                    } else {
+                        cur_msg += buff[i];
+                    }
+                } else if (buff[i] == *osc_state) {
+                    osc_state += 1;
+                } else {
+                    osc_state = OSC_PATTERN;
+                }
+            }
+        }
+
+        __builtin_unreachable();
+        return "";
+    }
+
+private:
+    static void restore_term() {
+        tcsetattr(0, TCSAFLUSH, &get().sav_term);
+    }
+
+    static void sigterm_handler(int sig) {
+        struct sigaction sa;
+
+        sa.sa_handler = SIG_DFL;
+        sa.sa_flags = 0;
+        sigemptyset (&sa.sa_mask);
+        sigaction(SIGTERM, &sa, NULL);
+
+        restore_term();
+
+        kill(0, SIGTERM);
+    }
+
+    void setup_pty() {
+        /* Set up terminal. */
+        struct termios raw_term;
+        tcgetattr(0, &sav_term);
+        raw_term = sav_term;
+        raw_term.c_lflag &= ~(ECHO | ICANON);
+        tcsetattr(0, TCSAFLUSH, &raw_term);
+        atexit(restore_term);
+
+        struct sigaction sa;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags   = 0;
+        sa.sa_handler = sigterm_handler;
+        sigaction(SIGTERM, &sa, NULL);
+    }
 };
 
 }

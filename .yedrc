@@ -1,1 +1,1 @@
-set ctags-flags "-R ."
+set ctags-additional-paths "imgui/imgui.h hwloc/include/hwloc.h"

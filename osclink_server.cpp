@@ -1,111 +1,84 @@
 #include <string>
-#include <sys/ioctl.h>
-#include <termios.h>
-#include <unistd.h>
-#include <errno.h>
-#include <signal.h>
 
+#include "osclink.hpp"
 #include "base64.hpp"
+#include "hwloc.h"
 
-static struct termios sav_term;
-
-static void restore_term(void) {
-    tcsetattr(0, TCSAFLUSH, &sav_term);
-}
-
-static void sigterm_handler(int sig) {
-    struct sigaction sa;
-
-    sa.sa_handler = SIG_DFL;
-    sa.sa_flags = 0;
-    sigemptyset (&sa.sa_mask);
-    sigaction(SIGTERM, &sa, NULL);
-
-    restore_term();
-
-    kill(0, SIGTERM);
-}
-
-static void send_to_client(std::string &&msg) {
-    std::string payload = "\033]9998;";
-    try {
-        payload += base64::to_base64(msg);
-    } catch (...) {}
-    payload += "\007";
-
-    int n = payload.size();
-    int t = 0;
-    int w = 0;
-    while (t < n) {
-        errno = 0;
-        w = write(STDOUT_FILENO, payload.c_str() + t, n - t);
-
-        if (w > 0) {
-            t += w;
-        } else if (w < 0 && (errno == EINTR || errno == EAGAIN)) {
-            continue;
-        } else {
-            break;
-        }
-    }
-}
+void send_topo(OSCLink_Server &link);
+void send_heatmap(OSCLink_Server &link);
 
 int main(void) {
-    /* Set up terminal. */
-    struct termios raw_term;
-    tcgetattr(0, &sav_term);
-    raw_term = sav_term;
-    raw_term.c_lflag &= ~(ECHO | ICANON);
-    tcsetattr(0, TCSAFLUSH, &raw_term);
-    atexit(restore_term);
+    if (!isatty(STDIN_FILENO)) {
+        printf("input must be from a PTY\n");
+        return 1;
+    }
 
-    struct sigaction sa;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags   = 0;
-    sa.sa_handler = sigterm_handler;
-    sigaction(SIGTERM, &sa, NULL);
-
+    auto &link = OSCLink_Server::get();
+    link.start();
 
     printf("Server started. Reaching out to client.\n");
 
-    send_to_client("SERVER-CONNECT");
+    link.send("SERVER-CONNECT");
 
+    while (true) {
+        std::string message = link.pull_next();
 
-    const char *osc_pattern = "\033]9999;";
-    const char *osc_state   = osc_pattern;
+        printf("%s\n", message.c_str());
 
-    char buff[4096];
-    std::string cur_msg;
-
-    int n = 0;
-    while ((n = read(STDIN_FILENO, buff, sizeof(buff))) > 0) {
-        for (int i = 0; i < n; i += 1) {
-            if (*osc_state == 0) {
-                if (buff[i] == '\x07') {
-                    try {
-                        printf("got a request\n");
-                        auto content = base64::from_base64(cur_msg);
-
-                        std::string out = "HEATMAP-DATA";
-                        for (int i = 0; i < 500; i += 1) {
-                            out += "\n";
-                            int n = random() % 100000;
-                            out += std::to_string(n);
-                        }
-                        send_to_client(std::move(out));
-                    } catch (...) {}
-                    cur_msg.clear();
-                    osc_state = osc_pattern;
-                } else {
-                    cur_msg += buff[i];
-                }
-            } else if (buff[i] == *osc_state) {
-                osc_state += 1;
-            } else {
-                osc_state = osc_pattern;
-            }
-        }
+        if      (message == "REQUEST/TOPOLOGY")     { send_topo(link);    }
+        else if (message == "REQUEST/HEATMAP-DATA") { send_heatmap(link); }
     }
 
     return 0;
+}
+
+
+void print_child(hwloc_obj_t obj, int depth) {
+    char type[32], attr[1024];
+    unsigned i;
+
+    hwloc_obj_type_snprintf(type, sizeof(type), obj, 0);
+
+    printf("%*s%s", 2*depth, "", type);
+
+    if (obj->os_index != (unsigned) -1) {
+        printf("#%u", obj->os_index);
+    }
+
+    hwloc_obj_attr_snprintf(attr, sizeof(attr), obj, " ", 0);
+
+    if (*attr) {
+        printf("(%s)", attr);
+    }
+
+    printf("\n");
+
+    for (i = 0; i < obj->arity; i++) {
+        print_child(obj->children[i], depth + 1);
+    }
+}
+
+void send_topo(OSCLink_Server &link) {
+    hwloc_topology_t t;
+
+    hwloc_topology_init(&t);
+    hwloc_topology_load(t);
+
+    hwloc_obj_t root = hwloc_get_root_obj(t);
+
+    print_child(root, 0);
+
+    link.send("TOPOLOGY");
+
+    hwloc_topology_destroy(t);
+}
+
+void send_heatmap(OSCLink_Server &link) {
+    std::string out = "HEATMAP-DATA";
+    for (int i = 0; i < 500; i += 1) {
+        out += "\n";
+        int n = random() % 100000;
+        out += std::to_string(n);
+    }
+    link.send(std::move(out));
 }

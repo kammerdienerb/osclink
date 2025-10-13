@@ -3,23 +3,11 @@
 #include <sstream>
 #include <cstdio>
 #include <unistd.h>
-#include <errno.h>
-#include <sys/ioctl.h>
-#include <termios.h>
-#include <signal.h>
-#include <sys/types.h>
-#include <poll.h>
-#include <fcntl.h>
-#ifdef __APPLE__
-#include <util.h>
-#else
-#include <pty.h>
-#include <utmp.h>
-#endif
-#include <pwd.h>
 
+#include "common.hpp"
 #include "osclink.hpp"
 #include "ui.hpp"
+#include "profile.hpp"
 
 void handle_message(OSCLink_Client &link, UI &ui, std::string &&message);
 
@@ -61,10 +49,12 @@ void handle_message(OSCLink_Client &link, UI &ui, std::string &&message) {
     if (s == "SERVER-CONNECT") {
         ui.set_connected(true);
         ui.log("The server has been connected.", true);
+    } else if (s == "TOPOLOGY") {
+        ui.add_topology();
     } else if (s == "HEATMAP-DATA") {
-        std::vector<int> data;
+        std::vector<float> data;
         while (std::getline(ss, s)) {
-            data.push_back(std::stoi(s));
+            data.push_back(std::stof(s));
         }
         ui.add_heatmap(std::move(data));
     }
