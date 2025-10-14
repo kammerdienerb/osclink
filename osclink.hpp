@@ -6,6 +6,8 @@
 #include <condition_variable>
 #include <optional>
 
+#include <cstdio>
+#include <unistd.h>
 #include <errno.h>
 #include <sys/ioctl.h>
 #include <termios.h>

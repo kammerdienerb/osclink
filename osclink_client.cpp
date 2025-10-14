@@ -2,12 +2,13 @@
 #include <string>
 #include <sstream>
 #include <cstdio>
-#include <unistd.h>
 
 #include "common.hpp"
 #include "osclink.hpp"
 #include "ui.hpp"
 #include "profile.hpp"
+#include "topo.hpp"
+#include "serio/serio.h"
 
 void handle_message(OSCLink_Client &link, UI &ui, std::string &&message);
 
@@ -37,25 +38,32 @@ int main() {
     link.finish();
 
     return 0;
-
 }
 
 void handle_message(OSCLink_Client &link, UI &ui, std::string &&message) {
     std::stringstream ss(message);
     std::string       s;
 
-    if (!std::getline(ss, s)) { return; }
+    if (!std::getline(ss, s, ';')) { return; }
+
+    ui.log("server sends: " + message, true);
 
     if (s == "SERVER-CONNECT") {
         ui.set_connected(true);
         ui.log("The server has been connected.", true);
     } else if (s == "TOPOLOGY") {
-        ui.add_topology();
+        if (std::getline(ss, s, ';')) {
+            Topology topo;
+            size_t consumed = Serio::deserialize(s, topo);
+            ui.log("Deserialized " + std::to_string(consumed) + " bytes of a topo struct", true);
+        }
     } else if (s == "HEATMAP-DATA") {
         std::vector<float> data;
-        while (std::getline(ss, s)) {
+        while (std::getline(ss, s, ';')) {
             data.push_back(std::stof(s));
         }
         ui.add_heatmap(std::move(data));
+    } else {
+        ui.log("bad server response: " + s, true);
     }
 }

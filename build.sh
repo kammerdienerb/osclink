@@ -8,7 +8,7 @@ if ! [ -d hwloc ]; then
     git clone https://github.com/open-mpi/hwloc || exit $?
     cd hwloc
     ./autogen.sh || exit $?
-    ./configure --disable-libxml2 --enable-shared=no --enable-static=yes || exit $?
+    ./configure --disable-io --disable-libxml2 --enable-shared=no --enable-static=yes || exit $?
     make -j4 || exit $?
     cd ${DIR}
 fi
@@ -33,14 +33,17 @@ OPT="-g -O0"
 #     OPT="-O3 -march=native -mtune=native"
 # fi
 
-CPP_FLAGS="--std=c++17 -Wall -Werror ${OPT} -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -Iimgui -Iimgui/backends -I/opt/homebrew/include"
+CPP_FLAGS="--std=c++17 -Wall -Werror ${OPT} -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -I. -Iimgui -Iimgui/backends -I/opt/homebrew/include"
 
-LD_FLAGS="-L/opt/homebrew/lib -lglfw"
+CLIENT_LD_FLAGS=""
+SERVER_LD_FLAGS=""
 if [ $(uname) = "Darwin" ]; then
-    LD_FLAGS+=" -framework OpenGL"
+    CLIENT_LD_FLAGS+=" -L/opt/homebrew/lib -framework OpenGL"
+    SERVER_LD_FLAGS+=" -framework Foundation -framework IOKit ${HWLOC_LIB}"
 else
-    LD_FLAGS+=" -lGL"
+    CLIENT_LD_FLAGS+=" -lGL"
 fi
+CLIENT_LD_FLAGS+=" -lglfw"
 
-g++ -o osclink_client ${SRC} ${CPP_FLAGS} ${LD_FLAGS} || exit $?
-g++ -o osclink_server -I${HWLOC_INCLUDE} osclink_server.cpp ${CPP_FLAGS} ${HWLOC_LIB} -lpciaccess -ludev || exit $?
+g++ -o osclink_client ${SRC} ${CPP_FLAGS} ${CLIENT_LD_FLAGS} || exit $?
+g++ -o osclink_server -I${HWLOC_INCLUDE} osclink_server.cpp ${CPP_FLAGS} ${SERVER_LD_FLAGS} || exit $?
