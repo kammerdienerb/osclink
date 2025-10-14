@@ -17,6 +17,7 @@
 #include "imgui_impl_opengl3.h"
 
 #include "osclink.hpp"
+#include "topo.hpp"
 
 namespace {
 
@@ -138,8 +139,19 @@ struct UI_SSO_Heat_Map_Widget : UI_Widget_Base {
 };
 
 struct UI_Topology_Widget : UI_Widget_Base {
+    Topology topo_copy;
+
     void _imgui_frame() override {
-        ImGui::Text("TOPO");
+        std::function<void(const Topology_Node)> subnode_imgui_frame;
+        subnode_imgui_frame = [&](const Topology_Node &node) {
+            ImGui::Text(node.name.c_str());
+
+            for (auto &pair : node.subnodes) {
+                subnode_imgui_frame(pair.second);
+            }
+        };
+
+        subnode_imgui_frame(this->topo_copy);
     }
 };
 
@@ -192,9 +204,13 @@ struct UI {
         this->connected = con;
     }
 
-    void add_topology() {
+    void add_topology(const Topology &topo) {
         this->clear_main_panel();
+
         auto t = std::make_unique<UI_Topology_Widget>();
+
+        t->topo_copy = topo;
+
         this->main_panel_widgets.push_back(std::move(t));
     }
 

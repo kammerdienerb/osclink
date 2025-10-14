@@ -36,12 +36,13 @@ OPT="-g -O0"
 CPP_FLAGS="--std=c++17 -Wall -Werror ${OPT} -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -I. -Iimgui -Iimgui/backends -I/opt/homebrew/include"
 
 CLIENT_LD_FLAGS=""
-SERVER_LD_FLAGS=""
+SERVER_LD_FLAGS=" ${HWLOC_LIB}"
 if [ $(uname) = "Darwin" ]; then
     CLIENT_LD_FLAGS+=" -L/opt/homebrew/lib -framework OpenGL"
-    SERVER_LD_FLAGS+=" -framework Foundation -framework IOKit ${HWLOC_LIB}"
+    SERVER_LD_FLAGS+=" -framework Foundation -framework IOKit"
 else
     CLIENT_LD_FLAGS+=" -lGL"
+    SERVER_LD_FLAGS+=" -ludev"
 fi
 CLIENT_LD_FLAGS+=" -lglfw"
 

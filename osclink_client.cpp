@@ -8,7 +8,10 @@
 #include "ui.hpp"
 #include "profile.hpp"
 #include "topo.hpp"
-#include "serio/serio.h"
+
+
+static Topology topo;
+
 
 void handle_message(OSCLink_Client &link, UI &ui, std::string &&message);
 
@@ -46,16 +49,15 @@ void handle_message(OSCLink_Client &link, UI &ui, std::string &&message) {
 
     if (!std::getline(ss, s, ';')) { return; }
 
-    ui.log("server sends: " + message, true);
+    ui.log("server sends: " + s, true);
 
     if (s == "SERVER-CONNECT") {
         ui.set_connected(true);
         ui.log("The server has been connected.", true);
     } else if (s == "TOPOLOGY") {
         if (std::getline(ss, s, ';')) {
-            Topology topo;
-            size_t consumed = Serio::deserialize(s, topo);
-            ui.log("Deserialized " + std::to_string(consumed) + " bytes of a topo struct", true);
+            topo = Topology::from_serialized(s);
+            ui.add_topology(topo);
         }
     } else if (s == "HEATMAP-DATA") {
         std::vector<float> data;

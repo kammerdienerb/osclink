@@ -2,7 +2,6 @@
 
 #include "osclink.hpp"
 #include "topo.hpp"
-#include "serio/serio.h"
 #include "base64.hpp"
 #include "hwloc.h"
 
@@ -69,11 +68,7 @@ void send_topo(OSCLink_Server &link) {
 
     topo_from_hwloc(root, topo);
 
-    std::string message = "TOPOLOGY;";
-    auto ser = Serio::serialize(topo);
-//     message += base64::to_base64(Serio::serialize(topo));
-
-    printf("%zu\n", ser.size());
+    std::string message = "TOPOLOGY;" + topo.to_serialized();
 
     link.send(std::move(message));
 
