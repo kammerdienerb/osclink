@@ -49,22 +49,25 @@ void handle_message(OSCLink_Client &link, UI &ui, std::string &&message) {
 
     if (!std::getline(ss, s, ';')) { return; }
 
-    ui.log("server sends: " + s, true);
+    ui.log("server sends: " + s);
 
     if (s == "SERVER-CONNECT") {
         ui.set_connected(true);
-        ui.log("The server has been connected.", true);
+        ui.log("The server has been connected.");
+        link.send("REQUEST/TOPOLOGY");
     } else if (s == "TOPOLOGY") {
         if (std::getline(ss, s, ';')) {
             topo = Topology::from_serialized(s);
-            ui.add_topology(topo);
+            ui.set_topology(topo);
+            ui.focus_tab("Dashboard");
         }
     } else if (s == "HEATMAP-DATA") {
         std::vector<float> data;
         while (std::getline(ss, s, ';')) {
             data.push_back(std::stof(s));
         }
-        ui.add_heatmap(std::move(data));
+        ui.set_heatmap(std::move(data));
+        ui.focus_tab("Profile");
     } else {
         ui.log("bad server response: " + s, true);
     }

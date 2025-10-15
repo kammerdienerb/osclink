@@ -3,7 +3,9 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <optional>
 #include <memory>
+#include <algorithm>
 #include <climits>
 
 #define GL_SILENCE_DEPRECATION
@@ -187,6 +189,21 @@ struct Log_Window : UI_Float_Window_Base {
     Log_Window() : UI_Float_Window_Base("Log") {}
 };
 
+struct UI_Main_Tab {
+    std::vector<std::unique_ptr<UI_Widget_Base>> widgets;
+    bool                                         focus_requested = false;
+
+    void imgui_frame() {
+        for (auto &widget : this->widgets) {
+            widget->imgui_frame();
+        }
+    }
+
+    void clear() {
+        this->widgets.clear();
+    }
+};
+
 struct UI {
     static UI& get() {
         static UI ui;
@@ -204,21 +221,30 @@ struct UI {
         this->connected = con;
     }
 
-    void add_topology(const Topology &topo) {
-        this->clear_main_panel();
+    void set_topology(const Topology &topo) {
+        this->topo_copy = topo;
+
+        UI_Main_Tab &tab = this->tabs["Dashboard"];
+
+        tab.clear();
 
         auto t = std::make_unique<UI_Topology_Widget>();
 
         t->topo_copy = topo;
 
-        this->main_panel_widgets.push_back(std::move(t));
+        tab.widgets.push_back(std::move(t));
     }
 
-    void add_heatmap(std::vector<float> &&data) {
-        this->clear_main_panel();
+    void set_heatmap(std::vector<float> &&data) {
+        UI_Main_Tab &tab = this->tabs["Profile"];
+
+        tab.clear();
+
         auto h = std::make_unique<UI_SSO_Heat_Map_Widget>();
+
         h->set_data(std::move(data));
-        this->main_panel_widgets.push_back(std::move(h));
+
+        tab.widgets.push_back(std::move(h));
     }
 
     void frame(OSCLink_Client &link) {
@@ -240,6 +266,12 @@ struct UI {
                     if (ImGui::MenuItem("Save", "Ctrl+S")) { /* ... */ }
                     ImGui::EndMenu();
                 }
+                if (ImGui::BeginMenu("Request")) {
+                    if (ImGui::MenuItem("Profile data")) {
+                        link.send("REQUEST/HEATMAP-DATA");
+                    }
+                    ImGui::EndMenu();
+                }
                 if (ImGui::BeginMenu("View")) {
                     if (ImGui::MenuItem("Log", "Ctrl+L")) {
                         this->get_log()->show = true;
@@ -251,20 +283,65 @@ struct UI {
 
             if (this->connected) {
                 ImGui::BeginChild("Left", { 150, 0 }, ImGuiChildFlags_Border | ImGuiChildFlags_ResizeX);
-                if (ImGui::Button("Topology")) {
-                    link.send("REQUEST/TOPOLOGY");
-                }
-                if (ImGui::Button("Heatmap")) {
-                    link.send("REQUEST/HEATMAP-DATA");
-                }
+                    auto content_height = ImGui::GetContentRegionAvail().y;
+
+//                     static float top_height      = 200.0f;
+                    static float top_height      = content_height / 2;
+                    float        splitter_height = 10.0f;
+
+                    top_height = std::clamp(top_height, 50.0f, content_height - 50.0f);
+
+                    ImGui::BeginChild("Left-Top", { -FLT_MIN, top_height }, 0);
+
+                    std::function<void(const Topology_Node)> topo_node;
+                    topo_node = [&](const Topology_Node &node) {
+                        if (ImGui::TreeNode(node.name.c_str())) {
+                            for (auto &pair : node.subnodes) {
+                                topo_node(pair.second);
+                            }
+                            ImGui::TreePop();
+                        }
+                    };
+
+                    topo_node(this->topo_copy);
+
+                    ImGui::EndChild();
+
+                    float splitter_y = ImGui::GetCursorPosY();
+                    ImGui::InvisibleButton("vsplitter", { -FLT_MIN, splitter_height });
+                    if (ImGui::IsItemActive()) {
+                        top_height += ImGui::GetIO().MouseDelta.y;
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+                    }
+                    ImGui::SetCursorPosY(splitter_y);
+                    ImGui::Separator();
+
+                    float bottom_height = content_height - top_height - splitter_height;
+                    ImGui::BeginChild("Left-Bottom", { -FLT_MIN, bottom_height }, 0);
+                    ImGui::Text("RECORDED PROFILES");
+                    ImGui::EndChild();
                 ImGui::EndChild();
 
                 ImGui::SameLine();
 
                 ImGui::BeginChild("Right", { 0, 0 }, 0);
-                for (auto &widget : this->main_panel_widgets) {
-                    widget->imgui_frame();
-                }
+                    ImGui::BeginTabBar("Main-Panel-Tabs", ImGuiTabBarFlags_AutoSelectNewTabs | ImGuiTabBarFlags_Reorderable);
+                    for (auto &pair : this->tabs) {
+                        int flags = 0;
+
+                        if (pair.second.focus_requested) {
+                            flags |= ImGuiTabItemFlags_SetSelected;
+                            pair.second.focus_requested = false;
+                        }
+
+                        if (ImGui::BeginTabItem(pair.first.c_str(), nullptr, flags)) {
+                            pair.second.imgui_frame();
+                            ImGui::EndTabItem();
+                        }
+                    }
+                    ImGui::EndTabBar();
                 ImGui::EndChild();
             } else {
                 ImGui::Text("Waiting for the server...");
@@ -298,17 +375,17 @@ struct UI {
         }
     }
 
-    void clear_main_panel() {
-        this->main_panel_widgets.clear();
+    void focus_tab(std::string tab_name) {
+        this->tabs[tab_name].focus_requested = true;
     }
 
 private:
-    ImGuiIO                                         &imgui_io;
-    GLFWwindow                                      *glfw_window = NULL;
-    std::map<std::string,
-             std::unique_ptr<UI_Float_Window_Base>>  float_windows;
-    std::vector<std::unique_ptr<UI_Widget_Base>>     main_panel_widgets;
-    bool                                             connected = false;
+    ImGuiIO                                                      &imgui_io;
+    GLFWwindow                                                   *glfw_window = NULL;
+    std::map<std::string, UI_Main_Tab>                            tabs;
+    std::map<std::string, std::unique_ptr<UI_Float_Window_Base>>  float_windows;
+    bool                                                          connected = false;
+    Topology                                                      topo_copy;
 
     UI() : imgui_io(ImGui::GetIO()) {
         ImGui::GetStyle().WindowRounding = 0.0f;
