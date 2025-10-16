@@ -285,7 +285,6 @@ struct UI {
                 ImGui::BeginChild("Left", { 150, 0 }, ImGuiChildFlags_Border | ImGuiChildFlags_ResizeX);
                     auto content_height = ImGui::GetContentRegionAvail().y;
 
-//                     static float top_height      = 200.0f;
                     static float top_height      = content_height / 2;
                     float        splitter_height = 10.0f;
 

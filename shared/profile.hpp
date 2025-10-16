@@ -1,57 +1,46 @@
 #pragma once
 
-#include <map>
 #include <string>
+#include <vector>
 #include <sstream>
 
 #include <cereal/cereal.hpp>
 #include <cereal/types/string.hpp>
 #include <cereal/types/vector.hpp>
-#include <cereal/types/map.hpp>
 #include <cereal/types/base_class.hpp>
 #include <cereal/archives/binary.hpp>
 
 #include "common.hpp"
+#include "topo.hpp"
 
 namespace {
 
-struct Topology_Edge {
-    std::vector<std::string> endpoints;
+struct Profile_Event {
+    std::string   name;
+    Resource_Type resource_type;
 
     template<class Archive>
     void serialize(Archive & archive) {
-        archive(endpoints);
+        archive(name, resource_type);
     }
 };
 
-
-struct Topology_Node {
-    Topology_Node()                   : name("<unknown>") { }
-    Topology_Node(std::string &&name) : name(name)        { }
-
-    Topology_Node &get_subnode(std::string name) {
-        Topology_Node &ref = this->subnodes[name];
-        ref.name = name;
-        return ref;
-    }
-
-    std::string                          name;
-    std::map<std::string, Topology_Node> subnodes;
-    std::map<std::string, Topology_Edge> edges;
+struct Profile_Data_Source {
+    std::string                name;
+    std::vector<Profile_Event> events;
 
     template<class Archive>
     void serialize(Archive & archive) {
-        archive(name, subnodes, edges);
+        archive(name, events);
     }
 };
 
-
-struct Topology : Topology_Node {
-    Topology() : Topology_Node("System") { }
+struct Profile_Config {
+    std::vector<Profile_Data_Source> sources;
 
     template<class Archive>
     void serialize(Archive & archive) {
-        archive(cereal::base_class<Topology_Node>(this));
+        archive(sources);
     }
 
     std::string to_serialized() {
@@ -65,8 +54,8 @@ struct Topology : Topology_Node {
         return ss.str();
     }
 
-    static Topology from_serialized(std::string &data) {
-        Topology ret;
+    static Profile_Config from_serialized(std::string &data) {
+        Profile_Config ret;
 
         std::stringstream ss(data);
 
@@ -77,6 +66,14 @@ struct Topology : Topology_Node {
 
         return ret;
     }
+};
+
+struct Monitor_Data {
+
+};
+
+struct Profile_Data {
+
 };
 
 }

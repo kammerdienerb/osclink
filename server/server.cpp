@@ -1,18 +1,28 @@
 #include <string>
 
 #include "osclink.hpp"
+#include "profile.hpp"
 #include "topo.hpp"
 #include "base64.hpp"
 #include "hwloc.h"
 
-void send_topo(OSCLink_Server &link);
-void send_heatmap(OSCLink_Server &link);
+static Profile_Config config;
+static Topology       topo;
+
+static void build_config();
+static void build_topo();
+static void send_config(OSCLink_Server &link);
+static void send_topo(OSCLink_Server &link);
+static void send_heatmap(OSCLink_Server &link);
 
 int main(void) {
     if (!isatty(STDIN_FILENO)) {
         printf("input must be from a PTY\n");
         return 1;
     }
+
+    build_config();
+    build_topo();
 
     auto &link = OSCLink_Server::get();
     link.start();
@@ -27,14 +37,18 @@ int main(void) {
         printf("%s\n", message.c_str());
 
         if      (message == "REQUEST/TOPOLOGY")     { send_topo(link);    }
+        else if (message == "REQUEST/CONFIG")       { send_config(link);  }
         else if (message == "REQUEST/HEATMAP-DATA") { send_heatmap(link); }
     }
 
     return 0;
 }
 
+static void build_config() {
 
-void topo_from_hwloc(hwloc_obj_t obj, Topology_Node &parent) {
+}
+
+static void topo_from_hwloc(hwloc_obj_t obj, Topology_Node &parent) {
     char type[32];
     unsigned i;
 
@@ -56,7 +70,7 @@ void topo_from_hwloc(hwloc_obj_t obj, Topology_Node &parent) {
     }
 }
 
-void send_topo(OSCLink_Server &link) {
+static void build_topo() {
     hwloc_topology_t t;
 
     hwloc_topology_init(&t);
@@ -64,18 +78,22 @@ void send_topo(OSCLink_Server &link) {
 
     hwloc_obj_t root = hwloc_get_root_obj(t);
 
-    Topology topo;
-
     topo_from_hwloc(root, topo);
-
-    std::string message = "TOPOLOGY;" + topo.to_serialized();
-
-    link.send(std::move(message));
 
     hwloc_topology_destroy(t);
 }
 
-void send_heatmap(OSCLink_Server &link) {
+static void send_config(OSCLink_Server &link) {
+    std::string message = "CONFIG;" + config.to_serialized();
+    link.send(std::move(message));
+}
+
+static void send_topo(OSCLink_Server &link) {
+    std::string message = "TOPOLOGY;" + topo.to_serialized();
+    link.send(std::move(message));
+}
+
+static void send_heatmap(OSCLink_Server &link) {
     std::string out = "HEATMAP-DATA";
     for (int i = 0; i < 500; i += 1) {
         out += ";";

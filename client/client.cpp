@@ -55,6 +55,7 @@ void handle_message(OSCLink_Client &link, UI &ui, std::string &&message) {
         ui.set_connected(true);
         ui.log("The server has been connected.");
         link.send("REQUEST/TOPOLOGY");
+        link.send("REQUEST/CONFIG");
     } else if (s == "TOPOLOGY") {
         if (std::getline(ss, s, ';')) {
             topo = Topology::from_serialized(s);
