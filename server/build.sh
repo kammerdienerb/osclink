@@ -20,9 +20,6 @@ cd ${DIR}/..
 SRC=""
 SRC+=" server/server.cpp"
 
-
-DEBUG="yes"
-
 if [ "${DEBUG}" == "yes" ]; then
     OPT="-g -O0"
 else

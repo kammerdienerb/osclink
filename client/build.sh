@@ -14,8 +14,6 @@ SRC+=" client/imgui/backends/imgui_impl_glfw.cpp"
 SRC+=" client/imgui/backends/imgui_impl_opengl3.cpp"
 
 
-DEBUG="yes"
-
 if [ "${DEBUG}" == "yes" ]; then
     OPT="-g -O0"
 else
