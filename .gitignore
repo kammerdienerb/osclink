@@ -3,3 +3,4 @@ imgui.ini
 *.dSYM
 tags
 server/hwloc
+.yedrc

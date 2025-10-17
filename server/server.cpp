@@ -104,7 +104,7 @@ static void build_config() {
 out:;
 }
 
-static void topo_from_hwloc(hwloc_obj_t obj, Topology_Node &parent) {
+static void topo_from_hwloc(hwloc_obj_t obj, Topology_Node *parent) {
     char type[32];
     unsigned i;
 
@@ -118,11 +118,19 @@ static void topo_from_hwloc(hwloc_obj_t obj, Topology_Node &parent) {
         node_name += "#";
         node_name += std::to_string(obj->os_index);
     }
+  
+    /* Create a new node under the current parent */
+    Topology_Node &sub = parent->get_subnode(node_name);
+    
+    /* Decide if we should go down in depth or not */
+    Topology_Node *new_parent = &sub;
+    if ((obj->arity == 1) && !obj->memory_arity && !obj->io_arity && !obj->misc_arity) {
+        new_parent = parent;
+    }
 
-    auto &sub = parent.get_subnode(node_name);
-
+    /* Recurse into children */
     for (i = 0; i < obj->arity; i++) {
-        topo_from_hwloc(obj->children[i], sub);
+        topo_from_hwloc(obj->children[i], new_parent);
     }
 }
 
@@ -134,7 +142,7 @@ static void build_topo() {
 
     hwloc_obj_t root = hwloc_get_root_obj(t);
 
-    topo_from_hwloc(root, topo);
+    topo_from_hwloc(root, &topo);
 
     hwloc_topology_destroy(t);
 }
