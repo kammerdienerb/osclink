@@ -7,5 +7,7 @@ cd ${DIR}
 mkdir -p build
 rm -rf build/*
 
+export DEBUG="yes"
+
 server/build.sh || exit $?
 client/build.sh || exit $?
