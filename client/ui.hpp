@@ -294,7 +294,13 @@ struct UI {
 
                     std::function<void(const Topology_Node)> topo_node;
                     topo_node = [&](const Topology_Node &node) {
-                        if (ImGui::TreeNode(node.name.c_str())) {
+                        ImGuiTreeNodeFlags tree_node_flags = ImGuiTreeNodeFlags_OpenOnDoubleClick |
+                                                             ImGuiTreeNodeFlags_OpenOnArrow |
+                                                             ImGuiTreeNodeFlags_NavLeftJumpsBackHere;
+                        if (node.subnodes.empty()) {
+                            tree_node_flags |= ImGuiTreeNodeFlags_Leaf;
+                        }
+                        if (ImGui::TreeNodeEx(node.name.c_str(), tree_node_flags)) {
                             for (auto &pair : node.subnodes) {
                                 topo_node(pair.second);
                             }
