@@ -86,7 +86,7 @@ static void build_topo() {
 
     hwloc_obj_t root = hwloc_get_root_obj(t);
 
-    topo_from_hwloc(root, &topo, 0);
+    topo_from_hwloc(root, &topo);
 
     hwloc_topology_destroy(t);
 }
