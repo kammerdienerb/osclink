@@ -1,19 +1,27 @@
 #include <string>
+#include <cstdarg>
+#include <alloca.h>
 
 #include "osclink.hpp"
 #include "profile.hpp"
 #include "topo.hpp"
 #include "base64.hpp"
 #include "hwloc.h"
+#include "subprocess.hpp"
+#include "json.hpp"
 
-static Profile_Config config;
-static Topology       topo;
+using json = nlohmann::json;
 
+static OSCLink_Server *osclink;
+static Profile_Config  config;
+static Topology        topo;
+
+static void report_warning(const char *fmt, ...);
 static void build_config();
 static void build_topo();
-static void send_config(OSCLink_Server &link);
-static void send_topo(OSCLink_Server &link);
-static void send_heatmap(OSCLink_Server &link);
+static void send_config();
+static void send_topo();
+static void send_heatmap();
 
 int main(void) {
     if (!isatty(STDIN_FILENO)) {
@@ -24,28 +32,76 @@ int main(void) {
     build_config();
     build_topo();
 
-    auto &link = OSCLink_Server::get();
-    link.start();
+    osclink = &OSCLink_Server::get();
+    osclink->start();
 
     printf("Server started. Reaching out to client.\n");
 
-    link.send("SERVER-CONNECT");
+    osclink->send("SERVER-CONNECT");
 
     while (true) {
-        std::string message = link.pull_next();
+        std::string message = osclink->pull_next();
 
         printf("%s\n", message.c_str());
 
-        if      (message == "REQUEST/TOPOLOGY")     { send_topo(link);    }
-        else if (message == "REQUEST/CONFIG")       { send_config(link);  }
-        else if (message == "REQUEST/HEATMAP-DATA") { send_heatmap(link); }
+        if      (message == "REQUEST/TOPOLOGY")     { send_topo();    }
+        else if (message == "REQUEST/CONFIG")       { send_config();  }
+        else if (message == "REQUEST/HEATMAP-DATA") { send_heatmap(); }
     }
 
     return 0;
 }
 
-static void build_config() {
+static void report_warning(const char *fmt, ...) {
+    va_list va;
 
+    va_start(va, fmt);
+    int size = vsnprintf(NULL, 0, fmt, va);
+    va_end(va);
+
+    char *buff = (char*)alloca(size + 1);
+
+    va_start(va, fmt);
+    vsnprintf(buff, size + 1, fmt, va);
+    va_end(va);
+
+    printf("WARNING: %s\n", buff);
+
+    std::string message = "SERVER-WARNING;";
+    message += buff;
+
+    osclink->send(std::move(message));
+}
+
+static void build_config() {
+    auto &perf = config.source("perf");
+
+    Subprocess perf_list({ "perf", "list", "-j" }, 1s);
+
+    if (perf_list.error() != Subprocess::Error::NONE) {
+        report_warning("failed to run 'perf list'");
+        goto out;
+    }
+
+    perf_list.join();
+
+    if (auto output = perf_list.output()) {
+        json events;
+        try {
+            events = json::parse(*output);
+            for (auto &event : events) {
+                perf.add_event(event["EventName"]);
+            }
+        } catch (...) {
+            report_warning("failed to parse 'perf list' output");
+        }
+    } else if (perf_list.exit_status() != 0) {
+        report_warning("'perf list' exited with non-zero status %d", perf_list.exit_status());
+    } else {
+        report_warning("error when running 'perf list'");
+    }
+
+out:;
 }
 
 static void topo_from_hwloc(hwloc_obj_t obj, Topology_Node &parent) {
@@ -83,22 +139,22 @@ static void build_topo() {
     hwloc_topology_destroy(t);
 }
 
-static void send_config(OSCLink_Server &link) {
+static void send_config() {
     std::string message = "CONFIG;" + config.to_serialized();
-    link.send(std::move(message));
+    osclink->send(std::move(message));
 }
 
-static void send_topo(OSCLink_Server &link) {
+static void send_topo() {
     std::string message = "TOPOLOGY;" + topo.to_serialized();
-    link.send(std::move(message));
+    osclink->send(std::move(message));
 }
 
-static void send_heatmap(OSCLink_Server &link) {
+static void send_heatmap() {
     std::string out = "HEATMAP-DATA";
     for (int i = 0; i < 500; i += 1) {
         out += ";";
         int n = random() % 100000;
         out += std::to_string(n);
     }
-    link.send(std::move(out));
+    osclink->send(std::move(out));
 }

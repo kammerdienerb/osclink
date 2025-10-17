@@ -19,6 +19,7 @@
 #include "imgui_impl_opengl3.h"
 
 #include "osclink.hpp"
+#include "profile.hpp"
 #include "topo.hpp"
 
 namespace {
@@ -141,10 +142,10 @@ struct UI_SSO_Heat_Map_Widget : UI_Widget_Base {
 };
 
 struct UI_Topology_Widget : UI_Widget_Base {
-    Topology topo_copy;
+    const Topology &topo;
 
     void _imgui_frame() override {
-        std::function<void(const Topology_Node)> subnode_imgui_frame;
+        std::function<void(const Topology_Node&)> subnode_imgui_frame;
         subnode_imgui_frame = [&](const Topology_Node &node) {
             ImGui::Text(node.name.c_str());
 
@@ -153,8 +154,10 @@ struct UI_Topology_Widget : UI_Widget_Base {
             }
         };
 
-        subnode_imgui_frame(this->topo_copy);
+        subnode_imgui_frame(this->topo);
     }
+
+    UI_Topology_Widget(const Topology &topo) : topo(topo) {}
 };
 
 struct UI_Float_Window_Base {
@@ -189,6 +192,24 @@ struct Log_Window : UI_Float_Window_Base {
     Log_Window() : UI_Float_Window_Base("Log") {}
 };
 
+struct Profile_Config_Window : UI_Float_Window_Base {
+    const Profile_Config &config;
+
+    void _imgui_frame() override {
+        for (auto &pair: this->config.sources) {
+            const auto &source = pair.second;
+            if (ImGui::TreeNode(source.name.c_str())) {
+                for (auto &event : source.events) {
+                    ImGui::Text("%s", event.second.name.c_str());
+                }
+                ImGui::TreePop();
+            }
+        }
+    }
+
+    Profile_Config_Window(const Profile_Config &config) : UI_Float_Window_Base("Profile Config"), config(config) {}
+};
+
 struct UI_Main_Tab {
     std::vector<std::unique_ptr<UI_Widget_Base>> widgets;
     bool                                         focus_requested = false;
@@ -199,14 +220,18 @@ struct UI_Main_Tab {
         }
     }
 
+    void add_widget(std::unique_ptr<UI_Widget_Base> &&w) {
+        this->widgets.push_back(std::move(w));
+    }
+
     void clear() {
         this->widgets.clear();
     }
 };
 
 struct UI {
-    static UI& get() {
-        static UI ui;
+    static UI& get(OSCLink_Client &osclink, const Profile_Config &config, const Topology &topo) {
+        static UI ui(osclink, config, topo);
         return ui;
     }
 
@@ -221,20 +246,6 @@ struct UI {
         this->connected = con;
     }
 
-    void set_topology(const Topology &topo) {
-        this->topo_copy = topo;
-
-        UI_Main_Tab &tab = this->tabs["Dashboard"];
-
-        tab.clear();
-
-        auto t = std::make_unique<UI_Topology_Widget>();
-
-        t->topo_copy = topo;
-
-        tab.widgets.push_back(std::move(t));
-    }
-
     void set_heatmap(std::vector<float> &&data) {
         UI_Main_Tab &tab = this->tabs["Profile"];
 
@@ -247,7 +258,7 @@ struct UI {
         tab.widgets.push_back(std::move(h));
     }
 
-    void frame(OSCLink_Client &link) {
+    void frame() {
         glfwPollEvents();
 
         // Start ImGui frame
@@ -268,13 +279,16 @@ struct UI {
                 }
                 if (ImGui::BeginMenu("Request")) {
                     if (ImGui::MenuItem("Profile data")) {
-                        link.send("REQUEST/HEATMAP-DATA");
+                        this->osclink.send("REQUEST/HEATMAP-DATA");
                     }
                     ImGui::EndMenu();
                 }
                 if (ImGui::BeginMenu("View")) {
                     if (ImGui::MenuItem("Log", "Ctrl+L")) {
                         this->get_log()->show = true;
+                    }
+                    if (ImGui::MenuItem("Profile Config", "Ctrl+P")) {
+                        this->get_profile_config_win()->show = true;
                     }
                     ImGui::EndMenu();
                 }
@@ -292,7 +306,7 @@ struct UI {
 
                     ImGui::BeginChild("Left-Top", { -FLT_MIN, top_height }, 0);
 
-                    std::function<void(const Topology_Node)> topo_node;
+                    std::function<void(const Topology_Node&)> topo_node;
                     topo_node = [&](const Topology_Node &node) {
                         if (ImGui::TreeNode(node.name.c_str())) {
                             for (auto &pair : node.subnodes) {
@@ -302,7 +316,7 @@ struct UI {
                         }
                     };
 
-                    topo_node(this->topo_copy);
+                    topo_node(this->topo);
 
                     ImGui::EndChild();
 
@@ -379,17 +393,25 @@ struct UI {
     }
 
 private:
+    OSCLink_Client                                               &osclink;
+    const Profile_Config                                         &config;
+    const Topology                                               &topo;
     ImGuiIO                                                      &imgui_io;
     GLFWwindow                                                   *glfw_window = NULL;
     std::map<std::string, UI_Main_Tab>                            tabs;
     std::map<std::string, std::unique_ptr<UI_Float_Window_Base>>  float_windows;
     bool                                                          connected = false;
-    Topology                                                      topo_copy;
 
-    UI() : imgui_io(ImGui::GetIO()) {
+    UI(OSCLink_Client &osclink, const Profile_Config &config, const Topology &topo)
+            : osclink(osclink), config(config), topo(topo), imgui_io(ImGui::GetIO()) {
+
         ImGui::GetStyle().WindowRounding = 0.0f;
 
-        this->float_windows["Log"] = std::make_unique<Log_Window>();
+        UI_Main_Tab &dash = this->tabs["Dashboard"];
+        dash.add_widget(std::make_unique<UI_Topology_Widget>(topo));
+
+        this->float_windows["Log"]            = std::make_unique<Log_Window>();
+        this->float_windows["Profile Config"] = std::make_unique<Profile_Config_Window>(config);
     }
 
     ~UI() {
@@ -402,6 +424,10 @@ private:
 
     Log_Window *get_log() {
         return dynamic_cast<Log_Window*>(this->float_windows["Log"].get());
+    }
+
+    Profile_Config_Window *get_profile_config_win() {
+        return dynamic_cast<Profile_Config_Window*>(this->float_windows["Profile Config"].get());
     }
 };
 

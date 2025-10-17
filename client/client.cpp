@@ -2,6 +2,7 @@
 #include <string>
 #include <sstream>
 #include <cstdio>
+#include <unistd.h>
 
 #include "common.hpp"
 #include "osclink.hpp"
@@ -10,8 +11,8 @@
 #include "topo.hpp"
 
 
-static Topology topo;
-
+static Profile_Config config;
+static Topology       topo;
 
 void handle_message(OSCLink_Client &link, UI &ui, std::string &&message);
 
@@ -21,21 +22,20 @@ int main() {
         return 1;
     }
 
+    auto &link = OSCLink_Client::get();
+
     GLFWwindow *window = setup_GLFW_and_ImGui();
-    UI         &ui     = UI::get();
+    UI         &ui     = UI::get(link, config, topo);
 
     ui.set_window(window);
 
-    auto &link = OSCLink_Client::get();
     link.start();
-
-    std::vector<int> heatmap;
 
     while (!ui.window_should_close()) {
         while (auto m = link.try_pull()) {
             handle_message(link, ui, std::move(*m));
         }
-        ui.frame(link);
+        ui.frame();
     }
 
     link.finish();
@@ -56,10 +56,18 @@ void handle_message(OSCLink_Client &link, UI &ui, std::string &&message) {
         ui.log("The server has been connected.");
         link.send("REQUEST/TOPOLOGY");
         link.send("REQUEST/CONFIG");
+    } else if (s == "SERVER-WARNING") {
+        if (std::getline(ss, s, ';')) {
+            s = "SERVER WARNING: " + s;
+            ui.log(std::move(s), true);
+        }
+    } else if (s == "CONFIG") {
+        if (std::getline(ss, s, ';')) {
+            config = Profile_Config::from_serialized(s);
+        }
     } else if (s == "TOPOLOGY") {
         if (std::getline(ss, s, ';')) {
             topo = Topology::from_serialized(s);
-            ui.set_topology(topo);
             ui.focus_tab("Dashboard");
         }
     } else if (s == "HEATMAP-DATA") {

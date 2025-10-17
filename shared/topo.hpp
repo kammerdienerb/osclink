@@ -15,7 +15,8 @@
 
 namespace {
 
-enum Resource_Type {
+enum class Resource_Type {
+    UNKNOWN,
     CPU,
     GPU,
 };

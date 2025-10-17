@@ -377,13 +377,13 @@ public:
 check:;
         if (auto msg = this->inbox.try_pop()) { return *msg; }
 
-        const char *osc_state = OSC_PATTERN;
+        static const char  *osc_state = OSC_PATTERN;
+        static std::string  cur_msg;
 
         char buff[4096];
-        std::string cur_msg;
 
         int n = 0;
-        while ((n = read(STDIN_FILENO, buff, sizeof(buff))) > 0) {
+        while (this->inbox.size() == 0 && (n = read(STDIN_FILENO, buff, sizeof(buff))) > 0) {
             for (int i = 0; i < n; i += 1) {
                 if (*osc_state == 0) {
                     if (buff[i] == '\x07') {
@@ -392,7 +392,6 @@ check:;
                         } catch (...) {}
                         cur_msg.clear();
                         osc_state = OSC_PATTERN;
-                        goto check;
                     } else {
                         cur_msg += buff[i];
                     }
@@ -403,6 +402,8 @@ check:;
                 }
             }
         }
+
+        goto check;
 
         __builtin_unreachable();
         return "";

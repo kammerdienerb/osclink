@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <map>
 #include <sstream>
 
 #include <cereal/cereal.hpp>
@@ -26,8 +27,15 @@ struct Profile_Event {
 };
 
 struct Profile_Data_Source {
-    std::string                name;
-    std::vector<Profile_Event> events;
+    std::string                          name;
+    std::map<std::string, Profile_Event> events;
+
+    Profile_Event &add_event(std::string name) {
+        Profile_Event &ref = this->events[name];
+        ref.name = name;
+        ref.resource_type = Resource_Type::UNKNOWN;
+        return ref;
+    }
 
     template<class Archive>
     void serialize(Archive & archive) {
@@ -36,7 +44,13 @@ struct Profile_Data_Source {
 };
 
 struct Profile_Config {
-    std::vector<Profile_Data_Source> sources;
+    std::map<std::string, Profile_Data_Source> sources;
+
+    Profile_Data_Source &source(std::string name) {
+        Profile_Data_Source &ref = this->sources[name];
+        ref.name = name;
+        return ref;
+    }
 
     template<class Archive>
     void serialize(Archive & archive) {
