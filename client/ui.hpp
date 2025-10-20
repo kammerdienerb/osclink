@@ -145,16 +145,21 @@ struct UI_Topology_Widget : UI_Widget_Base {
     const Topology &topo;
 
     void _imgui_frame() override {
-        std::function<void(const Topology_Node&)> subnode_imgui_frame;
-        subnode_imgui_frame = [&](const Topology_Node &node) {
-            ImGui::Text(node.name.c_str());
-
+        std::function<void(const Topology_Node&, ImVec2&, bool)> topo_node;
+        ImVec2 size = ImGui::GetContentRegionAvail();
+        topo_node = [&](const Topology_Node &node, ImVec2 &size, bool first) {
+            if (!first) ImGui::SameLine();
+            ImGui::BeginChild(node.name.c_str(), size, ImGuiChildFlags_Borders, 0);
+            ImGui::Text("%s", node.name.c_str());
+            ImVec2 newsize(size.x / node.subnodes.size(), size.y);
+            bool firstchild = true;
             for (auto &pair : node.subnodes) {
-                subnode_imgui_frame(pair.second);
+                topo_node(pair.second, newsize, firstchild);
+                if (firstchild) firstchild = false;
             }
+            ImGui::EndChild();
         };
-
-        subnode_imgui_frame(this->topo);
+        topo_node(this->topo, size, true);
     }
 
     UI_Topology_Widget(const Topology &topo) : topo(topo) {}
