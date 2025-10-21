@@ -143,12 +143,41 @@ struct UI_SSO_Heat_Map_Widget : UI_Widget_Base {
 
 struct UI_Topology_Widget : UI_Widget_Base {
     const Topology &topo;
+    
+    #define CHERRY_BRIGHT(v) ImVec4(0.502f, 0.075f, 0.256f, v)
+    #define CHERRY_MID(v)    ImVec4(0.455f, 0.198f, 0.301f, v)
+    #define CHERRY_DARK(v)   ImVec4(0.232f, 0.201f, 0.271f, v)
+    #define BLACK(v)         ImVec4(0.0f, 0.0f, 0.0f, v)
+    
+    void push_node_color(const Topology_Node &node) {
+        ImVec4 color;
+        switch (node.type) {
+            case Resource_Type::CPU_CORE:
+                color = CHERRY_BRIGHT(1.0f);
+                break;
+            case Resource_Type::CPU_THREAD:
+                color = CHERRY_MID(1.0f);
+                break;
+            case Resource_Type::UNKNOWN:
+                color = CHERRY_DARK(1.0f);
+                break;
+            default:
+                color = BLACK(1.0f);
+                break;
+        }
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, color);
+    }
+    
+    void pop_node_color() {
+        ImGui::PopStyleColor();
+    }
 
     void _imgui_frame() override {
         std::function<void(const Topology_Node&, ImVec2&, bool)> topo_node;
-        ImVec2 size = ImGui::GetContentRegionAvail();
+        
         topo_node = [&](const Topology_Node &node, ImVec2 &size, bool first) {
             if (!first) ImGui::SameLine();
+            push_node_color(node);
             ImGui::BeginChild(node.name.c_str(), size, ImGuiChildFlags_Borders, 0);
             ImGui::Text("%s", node.name.c_str());
             ImVec2 newsize(size.x / node.subnodes.size(), size.y);
@@ -158,8 +187,19 @@ struct UI_Topology_Widget : UI_Widget_Base {
                 if (firstchild) firstchild = false;
             }
             ImGui::EndChild();
+            pop_node_color();
         };
-        topo_node(this->topo, size, true);
+        
+        /* Call the topo_node lambda for each subnode of the root */
+        ImVec2 avail_size = ImGui::GetContentRegionAvail();
+        ImVec2 size(avail_size.x / this->topo.subnodes.size(), avail_size.y);
+        bool first = true;
+        for (auto &pair : this->topo.subnodes) {
+            topo_node(pair.second, size, first);
+            if (first) {
+                first = false;
+            }
+        }
     }
 
     UI_Topology_Widget(const Topology &topo) : topo(topo) {}
@@ -426,6 +466,7 @@ private:
     }
 
     ~UI() {
+        topo_node(this->topo);
         ImGui_ImplOpenGL3_Shutdown();
         ImGui_ImplGlfw_Shutdown();
         ImGui::DestroyContext();

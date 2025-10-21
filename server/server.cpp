@@ -104,26 +104,69 @@ static void build_config() {
 out:;
 }
 
-static void topo_from_hwloc(hwloc_obj_t obj, Topology_Node *parent) {
-    char type[32];
-    unsigned i;
+static bool filter_node(hwloc_obj_t obj, Topology_Node *node) {
+    if (obj->type == HWLOC_OBJ_MACHINE) {
+        return true;
+    }
+    return false;
+}
 
-    hwloc_obj_type_snprintf(type, sizeof(type), obj, 0);
+static Resource_Type hwloc_type_to_type(hwloc_obj_t obj) {
+  Resource_Type type = Resource_Type::UNKNOWN;
+  switch (obj->type) {
+      case HWLOC_OBJ_PACKAGE:
+          type = Resource_Type::SOCKET;
+          break;
+      case HWLOC_OBJ_CORE:
+          type = Resource_Type::CPU_CORE;
+          break;
+      case HWLOC_OBJ_PU:
+          type = Resource_Type::CPU_THREAD;
+          break;
+      case HWLOC_OBJ_L1CACHE:
+      case HWLOC_OBJ_L2CACHE:
+      case HWLOC_OBJ_L1ICACHE:
+      case HWLOC_OBJ_L2ICACHE:
+          type = Resource_Type::PRIVATE_CACHE;
+          break;
+      case HWLOC_OBJ_L3CACHE:
+      case HWLOC_OBJ_L4CACHE:
+      case HWLOC_OBJ_L5CACHE:
+      case HWLOC_OBJ_L3ICACHE:
+          type = Resource_Type::SHARED_CACHE;
+          break;
+      default:
+          fprintf(stderr, "WARNING: Found an unknown type: %d\n", obj->type);
+          break;
+  }
+  return type;
+}
+
+static void topo_from_hwloc(hwloc_obj_t obj, Topology_Node *parent) {
+    char type_str[32];
+    unsigned i;
+    Topology_Node *new_parent;
+
+    hwloc_obj_type_snprintf(type_str, sizeof(type_str), obj, 0);
 
     std::string node_name = "";
 
-    node_name += type;
+    node_name += type_str;
 
     if (obj->os_index != (unsigned) -1) {
         node_name += "#";
         node_name += std::to_string(obj->os_index);
     }
   
-    /* Create a new node under the current parent */
-    Topology_Node &sub = parent->get_subnode(node_name);
+    if (filter_node(obj, parent)) {
+        new_parent = parent;
+    } else {
+        /* Create a new node under the current parent */
+        Topology_Node &sub = parent->get_subnode(node_name, hwloc_type_to_type(obj));
+        new_parent = &sub;
+    }
     
     /* Decide if we should go down in depth or not */
-    Topology_Node *new_parent = &sub;
     if ((obj->arity == 1) && !obj->memory_arity && !obj->io_arity && !obj->misc_arity) {
         new_parent = parent;
     }
