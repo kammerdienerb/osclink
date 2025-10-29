@@ -16,9 +16,13 @@
 namespace {
 
 enum class Resource_Type {
+    ROOT,
+    CPU_CORE,
+    CPU_THREAD,
+    SHARED_CACHE,
+    PRIVATE_CACHE,
+    SOCKET,
     UNKNOWN,
-    CPU,
-    GPU,
 };
 
 struct Topology_Edge {
@@ -35,25 +39,27 @@ struct Topology_Node {
     Topology_Node()                   : name("<unknown>") { }
     Topology_Node(std::string &&name) : name(name)        { }
 
-    Topology_Node &get_subnode(std::string name) {
+    Topology_Node &get_subnode(std::string name, Resource_Type type) {
         Topology_Node &ref = this->subnodes[name];
         ref.name = name;
+        ref.type = type;
         return ref;
     }
 
     std::string                          name;
     std::map<std::string, Topology_Node> subnodes;
     std::map<std::string, Topology_Edge> edges;
+    Resource_Type                        type = Resource_Type::UNKNOWN;
 
     template<class Archive>
     void serialize(Archive & archive) {
-        archive(name, subnodes, edges);
+        archive(name, subnodes, edges, type);
     }
 };
 
 
 struct Topology : Topology_Node {
-    Topology() : Topology_Node("System") { }
+    Topology() : Topology_Node("System") { this->type = Resource_Type::ROOT; }
 
     template<class Archive>
     void serialize(Archive & archive) {
