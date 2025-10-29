@@ -3,4 +3,5 @@ imgui.ini
 *.dSYM
 tags
 server/hwloc
+client/libssh
 .yedrc

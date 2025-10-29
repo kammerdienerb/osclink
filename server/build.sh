@@ -30,7 +30,7 @@ else
     fi
 fi
 
-CPP_FLAGS="--std=c++17 -Wall -Werror ${OPT} -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -Ishared -Iserver -I${HWLOC_INCLUDE}"
+CPP_FLAGS="--std=c++20 -Wall -Werror ${OPT} -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -Ishared -Iserver -I${HWLOC_INCLUDE}"
 
 if [ $(uname) = "Darwin" ]; then
     CPP_FLAGS+=" -I/opt/homebrew/include"

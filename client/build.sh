@@ -2,6 +2,21 @@
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
+cd ${DIR}
+
+if ! [ -d libssh ]; then
+    git clone https://github.com/canonical/libssh || exit $?
+    cd libssh
+    mkdir build
+    cd build
+    cmake .. -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=$(realpath ../prefix) -DBUILD_SHARED_LIBS=OFF -DWITH_GSSAPI=OFF || exit $?
+    make -j $(nproc) || exit $?
+    make install -j $(nproc) || exit $?
+fi
+
+LIBSSH_INCLUDE="${DIR}/libssh/prefix/include"
+LIBSSH_LIB="${DIR}/libssh/prefix/lib64/libssh.a"
+
 cd ${DIR}/..
 
 SRC=""
@@ -12,6 +27,7 @@ SRC+=" client/imgui/imgui_tables.cpp"
 SRC+=" client/imgui/imgui_widgets.cpp"
 SRC+=" client/imgui/backends/imgui_impl_glfw.cpp"
 SRC+=" client/imgui/backends/imgui_impl_opengl3.cpp"
+SRC+=" client/imgui/misc/cpp/imgui_stdlib.cpp"
 
 
 if [ "${DEBUG}" == "yes" ]; then
@@ -24,13 +40,13 @@ else
     fi
 fi
 
-CPP_FLAGS="--std=c++17 -Wall -Werror ${OPT} -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -Ishared -Iclient -Iclient/imgui -Iclient/imgui/backends"
+CPP_FLAGS="--std=c++20 -Wall -Werror ${OPT} -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -Ishared -Iclient -Iclient/imgui -Iclient/imgui/backends -Iclient/imgui/misc/cpp -I${LIBSSH_INCLUDE}"
 
 if [ $(uname) = "Darwin" ]; then
     CPP_FLAGS+=" -I/opt/homebrew/include"
 fi
 
-LD_FLAGS=""
+LD_FLAGS=" ${LIBSSH_LIB} -lssl -lcrypto -lz"
 if [ $(uname) = "Darwin" ]; then
     LD_FLAGS+=" -L/opt/homebrew/lib -framework OpenGL"
 else
@@ -38,4 +54,17 @@ else
 fi
 LD_FLAGS+=" -lglfw"
 
-g++ -o build/client ${SRC} ${CPP_FLAGS} ${LD_FLAGS} || exit $?
+mkdir -p build/obj/client
+
+pids=()
+for f in ${SRC}; do
+    g++ -c -o build/obj/client/$(basename ${f}).o ${f} ${CPP_FLAGS} &
+    pids+=($!)
+done
+
+for pid in "${pids[@]}"; do
+    wait ${pid} || exit $?
+done
+
+
+g++ -o build/client build/obj/client/*.o ${CPP_FLAGS} ${LD_FLAGS} || exit $?

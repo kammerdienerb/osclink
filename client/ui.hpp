@@ -6,7 +6,11 @@
 #include <optional>
 #include <memory>
 #include <algorithm>
+#include <iterator>
+#include <stdexcept>
+#include <mutex>
 #include <climits>
+#include <cstring>
 
 #define GL_SILENCE_DEPRECATION
 #if defined(IMGUI_IMPL_OPENGL_ES2)
@@ -17,8 +21,10 @@
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
+#include "imgui_stdlib.h"
 
-#include "osclink.hpp"
+#include "log.hpp"
+#include "ssh_link.hpp"
 #include "profile.hpp"
 #include "topo.hpp"
 
@@ -61,7 +67,7 @@ GLFWwindow * setup_GLFW_and_ImGui() {
 #endif
 
     // Create window
-    GLFWwindow* window = glfwCreateWindow(800, 600, "OSCLink", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(800, 600, "Fast-by-Friday", NULL, NULL);
     if (!window) {
         return NULL;
     }
@@ -77,7 +83,6 @@ GLFWwindow * setup_GLFW_and_ImGui() {
 
     return window;
 }
-
 
 
 struct UI_Widget_Base {
@@ -180,6 +185,132 @@ struct UI_Float_Window_Base {
     virtual ~UI_Float_Window_Base() {}
 };
 
+struct SSH_Connection_Window : UI_Float_Window_Base {
+    SSH_Link_Client &ssh_link;
+
+    void _imgui_frame() override {
+        auto get_button_width = [](const char *text) {
+            return ImGui::GetStyle().FramePadding.x + ImGui::CalcTextSize(text).x;
+        };
+
+        switch (this->ssh_link.get_state()) {
+            case SSH_Link_Client::INIT: {
+                this->ssh_link.pass.clear();
+
+                ImGui::InputText("user", &this->ssh_link.user);
+                ImGui::InputText("hostname", &this->ssh_link.hostname);
+
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x - get_button_width("Connect"));
+                if (ImGui::Button("Connect")) {
+                    this->ssh_link.connect();
+                    if (this->ssh_link.is_host_known()) {
+                        this->ssh_link.try_authenticate_with_publickey();
+                    }
+                }
+
+                if (this->ssh_link.get_state() == SSH_Link_Client::AUTHENTICATED) {
+                    this->ssh_link.start();
+                    if (this->ssh_link.get_state() == SSH_Link_Client::ATTACHED) {
+                        this->show = false;
+                    }
+                }
+
+                break;
+            }
+            case SSH_Link_Client::CONNECTED: {
+                ImGui::InputText("user", &this->ssh_link.user, ImGuiInputTextFlags_ReadOnly);
+                ImGui::InputText("hostname", &this->ssh_link.hostname, ImGuiInputTextFlags_ReadOnly);
+
+                if (this->ssh_link.is_host_known()) {
+                    int do_auth = ImGui::InputText("password", &this->ssh_link.pass, ImGuiInputTextFlags_Password | ImGuiInputTextFlags_EnterReturnsTrue);
+
+                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x
+                                            - ImGui::GetStyle().ItemSpacing.x - get_button_width("Cancel")
+                                            - ImGui::GetStyle().ItemSpacing.x - get_button_width("Authenticate"));
+
+                    if (ImGui::Button("Cancel")) {
+                        this->ssh_link.disconnect();
+                    }
+
+                    ImGui::SameLine();
+                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x
+                                            - ImGui::GetStyle().ItemSpacing.x - get_button_width("Authenticate"));
+                    do_auth |= !!ImGui::Button("Authenticate");
+
+                    if (do_auth) {
+                        this->ssh_link.authenticate_with_password();
+                    }
+                } else {
+                    ImGui::TextWrapped("Warning: host is unknown.");
+
+                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x
+                                            - ImGui::GetStyle().ItemSpacing.x - get_button_width("Cancel")
+                                            - ImGui::GetStyle().ItemSpacing.x - get_button_width("Ignore")
+                                            - ImGui::GetStyle().ItemSpacing.x - get_button_width("Add to known_hosts"));
+                    if (ImGui::Button("Cancel")) {
+                        this->ssh_link.disconnect();
+                    }
+                    ImGui::SameLine();
+                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x
+                                            - ImGui::GetStyle().ItemSpacing.x - get_button_width("Ignore")
+                                            - ImGui::GetStyle().ItemSpacing.x - get_button_width("Add to known_hosts"));
+                    if (ImGui::Button("Ignore")) {
+                        this->ssh_link.ignore_unknown_host();
+                        this->ssh_link.try_authenticate_with_publickey();
+                    }
+                    ImGui::SameLine();
+                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x
+                                            - ImGui::GetStyle().ItemSpacing.x - get_button_width("Add to known_hosts"));
+                    if (ImGui::Button("Add to known_hosts")) {
+                        this->ssh_link.write_known_hosts();
+                        this->ssh_link.try_authenticate_with_publickey();
+                    }
+                }
+
+                if (this->ssh_link.get_state() == SSH_Link_Client::AUTHENTICATED) {
+                    log_message("Successful SSH connection!");
+                    this->ssh_link.start();
+                    if (this->ssh_link.get_state() == SSH_Link_Client::ATTACHED) {
+                        this->show = false;
+                    }
+                }
+
+                break;
+            }
+            case SSH_Link_Client::AUTHENTICATED: {
+                ImGui::TextWrapped("Currently connected to host %s, but not attached to the server", this->ssh_link.hostname.c_str());
+
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x
+                                        - ImGui::GetStyle().ItemSpacing.x - get_button_width("Disconnect"));
+                if (ImGui::Button("Disconnect")) {
+                    this->ssh_link.disconnect();
+                }
+
+                break;
+            }
+            case SSH_Link_Client::ATTACHED: {
+                ImGui::TextWrapped("Currently connected to %s", this->ssh_link.hostname.c_str());
+
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x
+                                        - ImGui::GetStyle().ItemSpacing.x - get_button_width("Disconnect"));
+                if (ImGui::Button("Disconnect")) {
+                    this->ssh_link.disconnect();
+                }
+
+                break;
+            }
+        }
+
+        if (this->ssh_link.get_error_string().size()) {
+            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255,0,0,255));
+            ImGui::TextWrapped(this->ssh_link.get_error_string().c_str());
+            ImGui::PopStyleColor();
+        }
+    }
+
+    SSH_Connection_Window(SSH_Link_Client &ssh_link) : UI_Float_Window_Base("Connect to Server"), ssh_link(ssh_link) {}
+};
+
 struct Log_Window : UI_Float_Window_Base {
     std::vector<std::string> items;
 
@@ -199,9 +330,16 @@ struct Profile_Config_Window : UI_Float_Window_Base {
         for (auto &pair: this->config.sources) {
             const auto &source = pair.second;
             if (ImGui::TreeNode(source.name.c_str())) {
-                for (auto &event : source.events) {
-                    ImGui::Text("%s", event.second.name.c_str());
-                }
+                auto item_fn = [](void *data, int idx) -> const char* {
+                    const Profile_Data_Source *source = (Profile_Data_Source*)data;
+                    auto it = source->events.begin();
+                    std::advance(it, idx);
+                    return it->second.name.c_str();
+                };
+
+                int cur_item = 0;
+                ImGui::ListBox("", &cur_item, item_fn, (void*)&source, source.events.size());
+
                 ImGui::TreePop();
             }
         }
@@ -230,11 +368,6 @@ struct UI_Main_Tab {
 };
 
 struct UI {
-    static UI& get(OSCLink_Client &osclink, const Profile_Config &config, const Topology &topo) {
-        static UI ui(osclink, config, topo);
-        return ui;
-    }
-
     UI(const UI&)            = delete;
     UI& operator=(const UI&) = delete;
 
@@ -279,7 +412,7 @@ struct UI {
                 }
                 if (ImGui::BeginMenu("Request")) {
                     if (ImGui::MenuItem("Profile data")) {
-                        this->osclink.send("REQUEST/HEATMAP-DATA");
+                        this->ssh_link.send("REQUEST/HEATMAP-DATA");
                     }
                     ImGui::EndMenu();
                 }
@@ -399,7 +532,8 @@ struct UI {
     }
 
 private:
-    OSCLink_Client                                               &osclink;
+    bool                                                          initialized = false;
+    SSH_Link_Client                                              &ssh_link;
     const Profile_Config                                         &config;
     const Topology                                               &topo;
     ImGuiIO                                                      &imgui_io;
@@ -408,24 +542,21 @@ private:
     std::map<std::string, std::unique_ptr<UI_Float_Window_Base>>  float_windows;
     bool                                                          connected = false;
 
-    UI(OSCLink_Client &osclink, const Profile_Config &config, const Topology &topo)
-            : osclink(osclink), config(config), topo(topo), imgui_io(ImGui::GetIO()) {
+    UI(SSH_Link_Client &ssh_link, const Profile_Config &config, const Topology &topo)
+            : ssh_link(ssh_link), config(config), topo(topo), imgui_io(ImGui::GetIO()) {
 
         ImGui::GetStyle().WindowRounding = 0.0f;
 
         UI_Main_Tab &dash = this->tabs["Dashboard"];
         dash.add_widget(std::make_unique<UI_Topology_Widget>(topo));
 
+        this->float_windows["SSH Connection"] = std::make_unique<SSH_Connection_Window>(ssh_link);
         this->float_windows["Log"]            = std::make_unique<Log_Window>();
         this->float_windows["Profile Config"] = std::make_unique<Profile_Config_Window>(config);
-    }
 
-    ~UI() {
-        ImGui_ImplOpenGL3_Shutdown();
-        ImGui_ImplGlfw_Shutdown();
-        ImGui::DestroyContext();
-        glfwDestroyWindow(this->glfw_window);
-        glfwTerminate();
+        this->float_windows["SSH Connection"]->show = true;
+
+        this->initialized = true;
     }
 
     Log_Window *get_log() {
@@ -435,6 +566,50 @@ private:
     Profile_Config_Window *get_profile_config_win() {
         return dynamic_cast<Profile_Config_Window*>(this->float_windows["Profile Config"].get());
     }
+
+    static std::unique_ptr<UI>& _get_instance() {
+        static std::unique_ptr<UI> instance;
+        return instance;
+    }
+
+public:;
+    static UI& get() {
+        auto &instance = _get_instance();
+
+        if (!instance) {
+            throw std::runtime_error("UI instance not initialized yet!");
+        }
+
+        return *instance;
+    }
+
+    static UI& get(SSH_Link_Client &ssh_link, const Profile_Config &config, const Topology &topo) {
+        auto &instance = _get_instance();
+
+        if (instance) {
+            throw std::runtime_error("UI instance already initialized!");
+        }
+
+        instance.reset(new UI(ssh_link, config, topo));
+
+        return *instance;
+    }
+
+    ~UI() {
+        ImGui_ImplOpenGL3_Shutdown();
+        ImGui_ImplGlfw_Shutdown();
+        ImGui::DestroyContext();
+        glfwDestroyWindow(this->glfw_window);
+        glfwTerminate();
+    }
 };
 
+}
+
+void log_message(std::string &&message, bool pop_up) {
+    static std::mutex mtx;
+
+    std::lock_guard<std::mutex> lock(mtx);
+
+    UI::get().log(std::move(message), pop_up);
 }

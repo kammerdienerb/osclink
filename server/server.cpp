@@ -2,7 +2,7 @@
 #include <cstdarg>
 #include <alloca.h>
 
-#include "osclink.hpp"
+#include "ssh_link.hpp"
 #include "profile.hpp"
 #include "topo.hpp"
 #include "base64.hpp"
@@ -12,9 +12,9 @@
 
 using json = nlohmann::json;
 
-static OSCLink_Server *osclink;
-static Profile_Config  config;
-static Topology        topo;
+static SSH_Link_Server *ssh_link;
+static Profile_Config   config;
+static Topology         topo;
 
 static void report_warning(const char *fmt, ...);
 static void build_config();
@@ -24,23 +24,18 @@ static void send_topo();
 static void send_heatmap();
 
 int main(void) {
-    if (!isatty(STDIN_FILENO)) {
-        printf("input must be from a PTY\n");
-        return 1;
-    }
-
     build_config();
     build_topo();
 
-    osclink = &OSCLink_Server::get();
-    osclink->start();
+    ssh_link = &SSH_Link_Server::get();
+    ssh_link->start();
 
     printf("Server started. Reaching out to client.\n");
 
-    osclink->send("SERVER-CONNECT");
+    ssh_link->send("SERVER-CONNECT");
 
-    while (true) {
-        std::string message = osclink->pull_next();
+    while (auto m = ssh_link->pull_next()) {
+        std::string &message = *m;
 
         printf("%s\n", message.c_str());
 
@@ -70,7 +65,7 @@ static void report_warning(const char *fmt, ...) {
     std::string message = "SERVER-WARNING;";
     message += buff;
 
-    osclink->send(std::move(message));
+    ssh_link->send(std::move(message));
 }
 
 static void build_config() {
@@ -118,10 +113,10 @@ static void topo_from_hwloc(hwloc_obj_t obj, Topology_Node *parent) {
         node_name += "#";
         node_name += std::to_string(obj->os_index);
     }
-  
+
     /* Create a new node under the current parent */
     Topology_Node &sub = parent->get_subnode(node_name);
-    
+
     /* Decide if we should go down in depth or not */
     Topology_Node *new_parent = &sub;
     if ((obj->arity == 1) && !obj->memory_arity && !obj->io_arity && !obj->misc_arity) {
@@ -149,12 +144,12 @@ static void build_topo() {
 
 static void send_config() {
     std::string message = "CONFIG;" + config.to_serialized();
-    osclink->send(std::move(message));
+    ssh_link->send(std::move(message));
 }
 
 static void send_topo() {
     std::string message = "TOPOLOGY;" + topo.to_serialized();
-    osclink->send(std::move(message));
+    ssh_link->send(std::move(message));
 }
 
 static void send_heatmap() {
@@ -164,5 +159,5 @@ static void send_heatmap() {
         int n = random() % 100000;
         out += std::to_string(n);
     }
-    osclink->send(std::move(out));
+    ssh_link->send(std::move(out));
 }

@@ -5,45 +5,37 @@
 #include <unistd.h>
 
 #include "common.hpp"
-#include "osclink.hpp"
+#include "ssh_link.hpp"
 #include "ui.hpp"
 #include "profile.hpp"
 #include "topo.hpp"
 
 
-static Profile_Config config;
-static Topology       topo;
+static SSH_Link_Client ssh_link;
+static Profile_Config  config;
+static Topology        topo;
 
-void handle_message(OSCLink_Client &link, UI &ui, std::string &&message);
+void handle_message(UI &ui, std::string &&message);
 
 int main() {
-    if (!isatty(STDOUT_FILENO)) {
-        printf("output must be run in a terminal\n");
-        return 1;
-    }
-
-    auto &link = OSCLink_Client::get();
-
     GLFWwindow *window = setup_GLFW_and_ImGui();
-    UI         &ui     = UI::get(link, config, topo);
+    UI         &ui     = UI::get(ssh_link, config, topo);
 
     ui.set_window(window);
 
-    link.start();
-
     while (!ui.window_should_close()) {
-        while (auto m = link.try_pull()) {
-            handle_message(link, ui, std::move(*m));
+        while (auto m = ssh_link.try_pull()) {
+            handle_message(ui, std::move(*m));
         }
         ui.frame();
     }
 
-    link.finish();
+    ssh_link.finish();
 
     return 0;
 }
 
-void handle_message(OSCLink_Client &link, UI &ui, std::string &&message) {
+void handle_message(UI &ui, std::string &&message) {
     std::stringstream ss(message);
     std::string       s;
 
@@ -54,8 +46,8 @@ void handle_message(OSCLink_Client &link, UI &ui, std::string &&message) {
     if (s == "SERVER-CONNECT") {
         ui.set_connected(true);
         ui.log("The server has been connected.");
-        link.send("REQUEST/TOPOLOGY");
-        link.send("REQUEST/CONFIG");
+        ssh_link.send("REQUEST/TOPOLOGY");
+        ssh_link.send("REQUEST/CONFIG");
     } else if (s == "SERVER-WARNING") {
         if (std::getline(ss, s, ';')) {
             s = "SERVER WARNING: " + s;
