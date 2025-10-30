@@ -348,7 +348,7 @@ struct SSH_Connection_Window : UI_Float_Window_Base {
 
         if (this->ssh_link.get_error_string().size()) {
             ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255,0,0,255));
-            ImGui::TextWrapped(this->ssh_link.get_error_string().c_str());
+            ImGui::TextWrapped("%s", this->ssh_link.get_error_string().c_str());
             ImGui::PopStyleColor();
         }
     }
@@ -593,11 +593,11 @@ private:
         ImGui::GetStyle().WindowRounding = 0.0f;
 
         UI_Main_Tab &dash = this->tabs["Dashboard"];
-        dash.add_widget(std::make_unique<UI_Topology_Widget>(topo));
+        dash.add_widget(std::make_unique<UI_Topology_Widget>(this->topo));
 
-        this->float_windows["SSH Connection"] = std::make_unique<SSH_Connection_Window>(ssh_link);
+        this->float_windows["SSH Connection"] = std::make_unique<SSH_Connection_Window>(this->ssh_link);
         this->float_windows["Log"]            = std::make_unique<Log_Window>();
-        this->float_windows["Profile Config"] = std::make_unique<Profile_Config_Window>(config);
+        this->float_windows["Profile Config"] = std::make_unique<Profile_Config_Window>(this->config);
 
         this->float_windows["SSH Connection"]->show = true;
 
