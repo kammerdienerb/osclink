@@ -7,7 +7,10 @@ cd ${DIR}
 if ! [ -d libssh ]; then
     git clone https://github.com/canonical/libssh || exit $?
     cd libssh
+    rm -rf build
     mkdir build
+    rm -rf prefix
+    mkdir prefix
     cd build
     cmake .. -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=$(realpath ../prefix) -DBUILD_SHARED_LIBS=OFF -DWITH_GSSAPI=OFF || exit $?
     make -j $(nproc) || exit $?
@@ -15,7 +18,12 @@ if ! [ -d libssh ]; then
 fi
 
 LIBSSH_INCLUDE="${DIR}/libssh/prefix/include"
-LIBSSH_LIB="${DIR}/libssh/prefix/lib64/libssh.a"
+
+if [ -d "${DIR}/libssh/prefix/lib" ]; then
+    LIBSSH_LIB="${DIR}/libssh/prefix/lib/libssh.a"
+elif [ -d "${DIR}/libssh/prefix/lib64" ]; then
+    LIBSSH_LIB="${DIR}/libssh/prefix/lib64/libssh.a"
+fi
 
 cd ${DIR}/..
 
